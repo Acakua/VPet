@@ -1,0 +1,10 @@
+# Project exclusions
+.pio/
+.platformio/
+.vscode/
+
+# Agent specific files
+AGENTS.md
+CLAUDE.md
+.agent/
+.claude/
