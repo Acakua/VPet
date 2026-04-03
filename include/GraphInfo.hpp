@@ -34,6 +34,7 @@ namespace VPet {
         SideHide_Left_Rise,     // 躲藏左显示 — Hiện ra từ trái (Bỏ qua)
         SideHide_Right_Main,    // 躲藏右 — Trốn bên phải (Bỏ qua)
         SideHide_Right_Rise,    // 躲藏右显示 — Hiện ra từ phải (Bỏ qua)
+        Eat,                    // 喂食 — Ăn uống (A→B→C) ★ BỔ SUNG
 
         GRAPH_TYPE_COUNT        // Tổng số loại — dùng cho kích thước mảng
     };

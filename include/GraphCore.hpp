@@ -17,6 +17,8 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <Arduino.h>
+#include <SD.h>
 #include "GameSave.hpp"
 #include "GraphInfo.hpp"
 #include "Utils.hpp"
@@ -176,6 +178,114 @@ namespace VPet {
         }
 
         // ====================================================================
+        // load() — Quét thư mục pet trên SD và tự động đăng ký hoạt ảnh
+        //
+        // Chiến lược quét thư mục:
+        //   root/ <GraphName>/ <ModeName>/ <AnimatIndex>/ *.bin
+        //   Ví dụ: /pet/Default/Nomal/1/000_150.bin
+        // ====================================================================
+        bool load(const char* root) {
+            File rootDir = SD.open(root);
+            if (!rootDir || !rootDir.isDirectory()) {
+                if (rootDir) rootDir.close();
+                return false;
+            }
+
+            // 1. Quét các GraphName (Default, Eat, ...)
+            File graphDir = rootDir.openNextFile();
+            while (graphDir) {
+                if (graphDir.isDirectory()) {
+                    const char* graphName = graphDir.name();
+                    // Bỏ qua thư mục ẩn/hệ thống
+                    if (graphName[0] != '.') {
+                        _scanModeFolders(graphDir, graphName);
+                    }
+                }
+                graphDir.close();
+                graphDir = rootDir.openNextFile();
+            }
+            rootDir.close();
+            return entryCount > 0;
+        }
+
+    private:
+        // Quét các ModeName (Nomal, Happy, ...)
+        void _scanModeFolders(File& graphDir, const char* graphName) {
+            File modeDir = graphDir.openNextFile();
+            while (modeDir) {
+                if (modeDir.isDirectory()) {
+                    const char* modeName = modeDir.name();
+                    _scanAnimatFolders(modeDir, graphName, modeName);
+                }
+                modeDir.close();
+                modeDir = graphDir.openNextFile();
+            }
+        }
+
+        // Quét các AnimatIndex (1, 2, 3, 4)
+        void _scanAnimatFolders(File& modeDir, const char* graphName, const char* modeName) {
+            File animatDir = modeDir.openNextFile();
+            while (animatDir) {
+                if (animatDir.isDirectory()) {
+                    const char* animatIdxStr = animatDir.name();
+                    uint8_t animatIdx = (uint8_t)atoi(animatIdxStr);
+                    
+                    if (animatIdx >= 1 && animatIdx <= 4) {
+                        _registerAnimation(animatDir, graphName, modeName, animatIdx);
+                    }
+                }
+                animatDir.close();
+                animatDir = modeDir.openNextFile();
+            }
+        }
+
+        // Đăng ký 1 thư mục chứa các file .bin làm 1 AnimationEntry
+        void _registerAnimation(File& animatDir, const char* graphName, 
+                               const char* modeName, uint8_t animatIdx) {
+            // Xác định metadata
+            GraphInfo info;
+            strncpy(info.name, graphName, 31);
+            info.type = _parseGraphType(graphName);
+            info.modeType = _parseModeType(modeName);
+            info.animat = (AnimatType)(animatIdx - 1); // 1->A_Start (0), 2->B_Loop (1), ...
+
+            // Tạo đường dẫn đầy đủ từ root (ví dụ: /pet/Default/Nomal/1)
+            char fullPath[128];
+            snprintf(fullPath, sizeof(fullPath), "/pet/%s/%s/%u", graphName, modeName, animatIdx);
+
+            // Đếm số lượng frame trong thư mục (đơn giản hóa: lấy entry đầu tiên của .bin)
+            uint16_t frames = 0;
+            File f = animatDir.openNextFile();
+            while (f) {
+                if (!f.isDirectory()) frames++;
+                f.close();
+                f = animatDir.openNextFile();
+            }
+
+            if (frames > 0) {
+                addGraph(AnimationEntry(fullPath, info, frames, 100));
+            }
+        }
+
+        // Helper Map tên -> Enum (Port từ logic VPet C#)
+        GraphType _parseGraphType(const char* name) {
+            if (strcmp(name, "Default") == 0) return GraphType::Default;
+            if (strcmp(name, "Eat") == 0) return GraphType::Eat;
+            if (strcmp(name, "Sleep") == 0) return GraphType::Sleep;
+            // TODO: Bổ sung thêm các loại khác
+            return GraphType::Common;
+        }
+
+        ModeType _parseModeType(const char* name) {
+            if (strcmp(name, "Happy") == 0) return ModeType::Happy;
+            if (strcmp(name, "Ill") == 0) return ModeType::Ill;
+            if (strcmp(name, "PoorCondition") == 0) return ModeType::PoorCondition;
+            return ModeType::Normal; // Default: Normal (mapped from SD folder "Nomal")
+        }
+
+    public:
+
+        // ====================================================================
         // addGraph() — Thêm animation entry vào từ điển
         // Port từ: GraphCore.cs::AddGraph() dòng 58-80
         //
@@ -293,7 +403,7 @@ namespace VPet {
                 if (strncmp(entries[i].info.name, name, 31) == 0
                     && entries[i].info.animat == animat
                     && entries[i].info.modeType == mode) {
-                    outBuf[count++] = &entries[i];
+                    count++;
                 }
             }
             return count;
