@@ -19,15 +19,15 @@
 // CẤU HÌNH PINOUT DỰ KIẾN (Thay đổi nếu cần)
 // ==========================================
 // I2C Touch (FT6336U)
-#define TOUCH_SDA 4
-#define TOUCH_SCL 5
+#define TOUCH_SDA 17
+#define TOUCH_SCL 18
 #define I2C_ADDR_FT6336U 0x38
 
-// SD Card (SPI Interface)
-#define SD_CS   47
-#define SD_MOSI 48
-#define SD_MISO 45
-#define SD_SCK  21
+// SD Card (SPI Interface - Chung với TFT)
+#define SD_CS   14
+#define SD_MOSI 6
+#define SD_MISO 5
+#define SD_SCK  7
 
 // Khởi tạo các Hardware Object
 TFT_eSPI tft = TFT_eSPI(); 

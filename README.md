@@ -21,6 +21,28 @@ A high-performance port of the popular **VPet-Simulator** (originally C#/WPF) to
 | **Touch** | Capacitive Touch (FT6336U) |
 | **Storage** | MicroSD Card (1GB+ for animations) |
 
+## 🔌 Hardware Wiring (Sơ đồ đấu dây)
+
+Đối với mạch **ESP32-S3 DevKitC-1 (N16R8)** và màn hình **ST7796S** tích hợp khe thẻ SD:
+
+| Thành phần | Chân Module | Chân GPIO (S3) | Ghi chú |
+| :--- | :--- | :--- | :--- |
+| **Nguồn** | VCC | 3.3V | |
+| | GND | GND | |
+| **Màn hình & SD** | **SCK** | **7** | Chung bus SPI |
+| | **SDI (MOSI)** | **6** | Chung bus SPI |
+| | **SDO (MISO)** | **5** | Chung bus SPI |
+| | **TFT_CS** | **10** | Chân chọn màn hình |
+| | **SD_CS** | **14** | Chân chọn thẻ SD |
+| | DC (RS) | 11 | |
+| | RESET (RES) | 12 | |
+| | LED (BL) | 13 | Đèn nền |
+| **Cảm ứng (I2C)** | **T_SDA** | **17** | |
+| | **T_SCL** | **18** | |
+
+> [!CAUTION]
+> Tuyệt đối không sử dụng các chân GPIO 33-37 cho các linh kiện khác vì chúng được dành riêng cho bộ nhớ PSRAM 8MB (OPI) trên phiên bản N16R8.
+
 ## 📦 Technical Stack
 
 - **Framework**: PlatformIO / Arduino-ESP32

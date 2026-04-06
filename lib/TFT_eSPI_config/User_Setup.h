@@ -7,20 +7,17 @@
 #define TFT_HEIGHT 480
 
 // Pinout mặc định (Có thể thay đổi khi hàn mạch thật)
-#ifdef TFT_MISO
-  #undef TFT_MISO
-#endif
-#define TFT_MISO 38
+#define TFT_MISO 5
 
 #ifdef TFT_MOSI
   #undef TFT_MOSI
 #endif
-#define TFT_MOSI 37
+#define TFT_MOSI 6
 
 #ifdef TFT_SCLK
   #undef TFT_SCLK
 #endif
-#define TFT_SCLK 36
+#define TFT_SCLK 7
 
 #ifdef TFT_CS
   #undef TFT_CS
