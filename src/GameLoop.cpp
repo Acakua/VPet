@@ -8,10 +8,21 @@
 
 namespace VPet {
 
+    const char* _modeTypeName(ModeType m) {
+        switch (m) {
+            case ModeType::Happy: return "Happy";
+            case ModeType::Normal: return "Normal";
+            case ModeType::PoorCondition: return "PoorCondition";
+            case ModeType::Ill: return "Ill";
+            default: return "Unknown";
+        }
+    }
+
     // ================================================================
     // start()
     // ================================================================
     void GameLoop::start() {
+        VPET_LOG_I("LOOP", "GameLoop started. Interval: %u ms", eventIntervalMs);
         lastInteractionTime = millis();
         lastEventTime = millis();
     }
@@ -20,6 +31,7 @@ namespace VPet {
     // interact() — Người dùng tương tác (chạm)
     // ================================================================
     void GameLoop::interact() {
+        VPET_LOG_D("LOOP", "Interaction detected, resetting idle timers.");
         lastInteractionTime = millis();
     }
 
@@ -32,6 +44,7 @@ namespace VPet {
         uint32_t now = millis();
         if (now - lastEventTime >= eventIntervalMs) {
             lastEventTime = now;
+            VPET_LOG_D("LOOP", "Event timer pulse (15s)");
             eventTimerElapsed();
         }
     }
@@ -51,29 +64,32 @@ namespace VPet {
         if (isIdle) {
             // CountNomal = anim->countNormal
             int16_t rndDisplay = 20 > (20 - anim->countNormal) ? 20 : (20 - anim->countNormal); 
-            // C# gốc: Math.Max(20, Core.Controller.InteractionCycle - CountNomal);
-            // Ở đây gán cố định InteractionCycle = 20 để đơn giản hóa
-
+            
             if (anim->currentGraphType == GraphType::Work) {
                 rndDisplay = 2 * rndDisplay + 20;
             }
 
             int rnd = Utils::randomInt(rndDisplay);
+            VPET_LOG_V("LOOP", "Idle check - CountNormal: %d, Max: %d, Dice: %d", anim->countNormal, rndDisplay, rnd);
+
             switch (rnd) {
                 case 0:
                 case 1:
                 case 2:
-                    // DisplayMove(); // Chưa implement Move trên ESP32
+                    VPET_LOG_V("LOOP", "Dice rolled Move (not implemented)");
                     break;
                 case 3:
                 case 4:
                 case 5:
+                    VPET_LOG_I("LOOP", "Dice rolled -> displayIdel()");
                     anim->displayIdel();
                     break;
                 case 6:
+                    VPET_LOG_I("LOOP", "Dice rolled -> displayStateONE()");
                     anim->displayStateONE();
                     break;
                 case 7:
+                    VPET_LOG_I("LOOP", "Dice rolled -> displaySleep(false)");
                     anim->displaySleep(false);
                     break;
                 default:
@@ -88,9 +104,12 @@ namespace VPet {
     // Port từ MainLogic.cs::PlaySwitchAnimat() dòng 432-453
     // ================================================================
     void GameLoop::playSwitchAnimat(ModeType before, ModeType after) {
+        VPET_LOG_I("LOOP", "Mode change detected: %s -> %s", _modeTypeName(before), _modeTypeName(after));
+
         if (anim->currentGraphType != GraphType::Default && 
             anim->currentGraphType != GraphType::Switch_Down && 
             anim->currentGraphType != GraphType::Switch_Up) {
+            VPET_LOG_V("LOOP", "Skip switch animation (busy with %u)", (uint8_t)anim->currentGraphType);
             return;
         }
 
@@ -99,31 +118,15 @@ namespace VPet {
             return;
         }
 
-        // Logic đệ quy trong C#, ở đây trên C++ ta simplify lại bằng cách
-        // chỉ phát 1 lần rồi về Normal, vì callback lambda đệ quy trong C++
-        // phức tạp và dễ gây leak bộ nhớ.
         if (before < after) {
             // Xấu đi
-            const char* name = anim->graph->findName(GraphType::Switch_Down);
-            if (name) {
-                // Tạm thời gọi trực tiếp qua player, hoặc map vào state machine
-                // Để chuẩn, đáng lẽ phải có 1 state PLAYING_SWITCH
-                // Ta có thể gọi hàm của anim->playAnimation() nếu ta mở API
-                // Ở đây, simplifed:
-                anim->displayToNormal();
-            } else {
-                anim->displayToNormal();
-            }
+            VPET_LOG_I("LOOP", "Trigger Switch_Down animation");
+            anim->displayToNormal();
         } else {
             // Tốt lên
-            const char* name = anim->graph->findName(GraphType::Switch_Up);
-            if (name) {
-                anim->displayToNormal();
-            } else {
-                anim->displayToNormal();
-            }
+            VPET_LOG_I("LOOP", "Trigger Switch_Up animation");
+            anim->displayToNormal();
         }
-        // TODO: Mở rộng state machine để xử lý chuỗi switch recursive
     }
 
     // ================================================================
@@ -131,8 +134,9 @@ namespace VPet {
     // Port từ MainLogic.cs::FunctionSpend() dòng 234-426
     // ================================================================
     void GameLoop::functionSpend(double timePass) {
+        VPET_TIME_START(SurvivalLogic);
+
         save->cleanChange();
-        // save->storeTake(); // Bỏ qua trên ESP32
 
         double freedrop = (millis() - lastInteractionTime) / 60000.0; // TotalMinutes
         if (freedrop < 1.0) {
@@ -152,7 +156,6 @@ namespace VPet {
 
         switch (anim->workState) {
             case WorkingState::Normal:
-                // 默认 (Default/Empty)
                 if (save->getStrengthFood() >= sm50) {
                     save->strengthChangeFood(-timePass);
                     save->strengthChange(timePass);
@@ -184,7 +187,6 @@ namespace VPet {
                 break;
 
             case WorkingState::Sleep:
-                // 睡觉
                 save->strengthChange(timePass * 2.0);
                 save->strengthChangeFood(timePass);
                 if (save->getStrengthFood() <= sm25) {
@@ -194,8 +196,6 @@ namespace VPet {
                 }
 
                 save->strengthChangeDrink(timePass);
-                // C# có logical bug: if (StrengthDrink >= sm25) -> nhưng comment là "低状态2倍" (dòng 263)
-                // Ta fix logic thành <= sm25 cho đúng ý nghĩa.
                 if (save->getStrengthDrink() <= sm25) {
                     save->strengthChangeDrink(timePass); // X2
                 } else if (save->getStrengthDrink() >= sm75) {
@@ -310,9 +310,15 @@ namespace VPet {
         }
 
         if (save->modeType == ModeType::Ill && anim->workState == WorkingState::Work) {
-            // TODO: Stop work via WorkTimer
+            VPET_LOG_W("LOOP", "Pet is Ill, stopping work.");
             anim->workState = WorkingState::Normal;
         }
+
+        VPET_LOG_V("PET", "Stats: HLT %.1f, STR %.1f, FD %.1f, DK %.1f, FLG %.1f, MD %s", 
+                  save->getHealth(), save->getStrength(), save->getStrengthFood(), 
+                  save->getStrengthDrink(), save->getFeeling(), _modeTypeName(save->modeType));
+        
+        VPET_TIME_END(SurvivalLogic, "LOOP");
     }
 
 } // namespace VPet

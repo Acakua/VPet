@@ -1,8 +1,3 @@
-/**
- * main.cpp — Điểm khởi đầu của VPet-ESP32
- * Tích hợp toàn bộ Phân hệ 1, 2, 3 và phần driver Phân hệ 4.
- */
-
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -11,6 +6,7 @@
 #include <lvgl.h>
 
 // Include tất cả file đã port ở các Phase trước
+#include "Utils.hpp"
 #include "GameSave.hpp"
 #include "GameLoop.hpp"
 #include "AnimationPlayer.hpp"
@@ -58,8 +54,13 @@ WorkTimerDisplay* workTimer = nullptr;
 MessageBubble* msgBubble = nullptr;
 
 // ==========================================
-// CALLBACK CHO TỪNG LỚP LVGL DRIVER
+// CALLBACK CHO TỨNG LỚP LVGL DRIVER
 // ==========================================
+
+// LVGL Log Callback
+void my_log_cb(const char * buf) {
+    Serial.printf("[LVGL] %s", buf);
+}
 
 // Flush điểm ảnh ra TFT
 void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
@@ -100,7 +101,11 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
             data->state = LV_INDEV_STATE_PR;
             data->point.x = x;
             data->point.y = y;
+            VPET_LOG_V("TOUCH", "Pressed at X:%u, Y:%u", x, y);
         } else {
+            if (data->state == LV_INDEV_STATE_PR) {
+                VPET_LOG_V("TOUCH", "Released");
+            }
             data->state = LV_INDEV_STATE_REL;
         }
     } else {
@@ -118,35 +123,49 @@ void lv_tick_task(void *arg) {
 // ==========================================
 void setup() {
     Serial.begin(115200);
-    delay(1500);
+    Serial.setDebugOutput(true);
+    delay(2000); 
 
-    Serial.println("--- VPet ESP32 Boot Sequence Initiated ---");
+    VPET_LOG_I("SYS", "--- VPet ESP32 Boot Sequence Initiated ---");
+    VPET_MEM_DUMP("SYS");
 
     // 1. Phân hệ 4A: Khởi tạo màn hình
+    VPET_LOG_I("SYS", "Initializing TFT...");
     tft.begin();
     tft.setRotation(0); 
     tft.fillScreen(TFT_BLACK);
-    Serial.println("> TFT Initialized (TFT_eSPI).");
+    VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
     
     // 2. Phân hệ 4B: Khởi tạo chân I2C cho cảm ứng (FT6336U)
+    VPET_LOG_I("SYS", "Initializing I2C Touch...");
     Wire.begin(TOUCH_SDA, TOUCH_SCL);
-    Serial.println("> I2C Touch Driver Ready.");
+    VPET_LOG_I("SYS", "I2C Touch Driver Ready.");
     
     // 3. Phân hệ 4C: Khởi tạo SD Card
+    VPET_LOG_I("SYS", "Initializing SD Card...");
     SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
     if(!SD.begin(SD_CS, SPI, 20000000)) {
-        Serial.println(">> ERROR: SD Card Mount Failed!");
+        VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
-        Serial.println("> SD Card Driver Ready.");
+        VPET_LOG_I("SYS", "SD Card Driver Ready.");
     }
 
     // Khởi tạo Graphic System (LVGL)
+    VPET_LOG_I("SYS", "Initializing LVGL...");
     lv_init();
+    lv_log_register_print_cb(my_log_cb);
 
     // 4. Cấp phát Memory cho Framebuffer (PSRAM)
+    VPET_LOG_I("SYS", "Allocating Framebuffers in PSRAM...");
     uint32_t bufSize = screenWidth * 60; // 60 line ~ khoảng 38KB mỗi buffer
     buf1 = (lv_color_t*)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
     buf2 = (lv_color_t*)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    
+    if (!buf1 || !buf2) {
+        VPET_LOG_E("SYS", "Framebuffer allocation failed!");
+    } else {
+        VPET_LOG_I("SYS", "Framebuffers allocated successfully.");
+    }
     
     lv_disp_draw_buf_init(&draw_buf, buf1, buf2, bufSize);
 
@@ -182,15 +201,17 @@ void setup() {
     // ==============================================
     // KHỞI TẠO LOGIC VPET VÀ COMPONENT
     // ==============================================
+    VPET_LOG_I("SYS", "Initializing VPet Logic...");
     gameSave = new GameSave();
     
     // Tải dữ liệu lưu trước đó thẻ SD (Phân hệ 4D)
+    VPET_LOG_I("SYS", "Loading Save Data...");
     if (!gameSave->load("/savedata.bin")) {
-        Serial.println("> No save file found, creating a new pet...");
+        VPET_LOG_W("SYS", "No save file found, creating a new pet...");
         gameSave->initNewGame("V-Pet");
         gameSave->money = 1500.50; // Mock Start Money
     } else {
-        Serial.println("> Save file loaded successfully!");
+        VPET_LOG_I("SYS", "Save file loaded successfully.");
     }
     
     graphCore = new GraphCore();
@@ -216,11 +237,28 @@ void setup() {
     statusBar->show();
     msgBubble->show("VPet-System", "Khởi động thành công! Module đang chờ load dữ liệu.", 5000);
 
-    Serial.println("--- VPet ESP32 All System Init Done ---");
+    VPET_LOG_I("SYS", "--- VPet ESP32 All System Init Done ---");
+    VPET_MEM_DUMP("SYS");
 }
 
 void loop() {
     static uint32_t lastSaveTime = millis();
+    static uint32_t lastHeartbeat = 0;
+
+    // Heartbeat log every 10 seconds
+    if (millis() - lastHeartbeat >= 10000) {
+        VPET_LOG_I("SYS", "Heartbeat - System Running...");
+        VPET_MEM_DUMP("SYS");
+        
+        // In thêm stats của Pet để debug logic
+        if (gameSave) {
+            VPET_LOG_I("PET", "Stats Debug: HP:%.1f, Hunger:%.1f, Thirst:%.1f, Money:%.1f", 
+                      gameSave->getHealth(), gameSave->getStrengthFood(), 
+                      gameSave->getStrengthDrink(), gameSave->money);
+        }
+        
+        lastHeartbeat = millis();
+    }
 
     // 1. Core tick điều hoà việc Render UI và event click
     lv_timer_handler();
@@ -246,9 +284,12 @@ void loop() {
 
     // 6. Auto-Save mỗi 5 phút (300,000 ms)
     if (millis() - lastSaveTime >= 300000) {
+        VPET_LOG_I("SYS", "Initiating Auto-Save...");
         if (gameSave && gameSave->save("/savedata.bin")) {
-            Serial.println("Auto-saved game state to SD Card.");
+            VPET_LOG_I("SYS", "Auto-saved game state to SD Card.");
             if (msgBubble) msgBubble->show("System", "Đã tự động lưu thành công!", 3000);
+        } else {
+            VPET_LOG_E("SYS", "Auto-save failed!");
         }
         lastSaveTime = millis();
     }

@@ -185,8 +185,12 @@ namespace VPet {
         //   Ví dụ: /pet/Default/Nomal/1/000_150.bin
         // ====================================================================
         bool load(const char* root) {
+            VPET_LOG_I("SD", "Starting SD animation scan at root: %s", root);
+            VPET_TIME_START(SDScan);
+
             File rootDir = SD.open(root);
             if (!rootDir || !rootDir.isDirectory()) {
+                VPET_LOG_E("SD", "Failed to open root directory or not a directory: %s", root);
                 if (rootDir) rootDir.close();
                 return false;
             }
@@ -198,6 +202,7 @@ namespace VPet {
                     const char* graphName = graphDir.name();
                     // Bỏ qua thư mục ẩn/hệ thống
                     if (graphName[0] != '.') {
+                        VPET_LOG_V("SD", "Scanning graph category: %s", graphName);
                         _scanModeFolders(graphDir, graphName);
                     }
                 }
@@ -205,6 +210,9 @@ namespace VPet {
                 graphDir = rootDir.openNextFile();
             }
             rootDir.close();
+            
+            VPET_TIME_END(SDScan, "SD");
+            VPET_LOG_I("SD", "Scan complete. Total animations registered: %u", entryCount);
             return entryCount > 0;
         }
 
@@ -215,6 +223,7 @@ namespace VPet {
             while (modeDir) {
                 if (modeDir.isDirectory()) {
                     const char* modeName = modeDir.name();
+                    VPET_LOG_V("SD", "  Found mode folder: %s", modeName);
                     _scanAnimatFolders(modeDir, graphName, modeName);
                 }
                 modeDir.close();
@@ -232,6 +241,8 @@ namespace VPet {
                     
                     if (animatIdx >= 1 && animatIdx <= 4) {
                         _registerAnimation(animatDir, graphName, modeName, animatIdx);
+                    } else {
+                        VPET_LOG_W("SD", "    Skipping unknown animat folder: %s", animatIdxStr);
                     }
                 }
                 animatDir.close();
@@ -257,13 +268,22 @@ namespace VPet {
             uint16_t frames = 0;
             File f = animatDir.openNextFile();
             while (f) {
-                if (!f.isDirectory()) frames++;
+                if (!f.isDirectory()) {
+                    // Kiểm tra xem có phải file .bin không
+                    const char* fname = f.name();
+                    if (strstr(fname, ".bin")) {
+                        frames++;
+                    }
+                }
                 f.close();
                 f = animatDir.openNextFile();
             }
 
             if (frames > 0) {
+                VPET_LOG_I("SD", "    Registered: %s/%s/%u -> %u frames", graphName, modeName, animatIdx, frames);
                 addGraph(AnimationEntry(fullPath, info, frames, 100));
+            } else {
+                VPET_LOG_W("SD", "    No .bin frames found in: %s", fullPath);
             }
         }
 
@@ -348,6 +368,8 @@ namespace VPet {
         const AnimationEntry* findGraph(const char* name, AnimatType animat, ModeType mode) const {
             if (!name) return nullptr;
 
+            VPET_LOG_V("GFX", "Searching animation: %s, animat: %u, mode: %u", name, (uint8_t)animat, (uint8_t)mode);
+
             // Thu thập candidates khớp name + animat
             const AnimationEntry* candidates[MAX_ANIMATION_ENTRIES];
             uint16_t candCount = 0;
@@ -357,18 +379,28 @@ namespace VPet {
                     candidates[candCount++] = &entries[i];
                 }
             }
-            if (candCount == 0) return nullptr;
+            
+            if (candCount == 0) {
+                VPET_LOG_W("GFX", "  Animation not found: %s", name);
+                return nullptr;
+            }
 
             // Tầng 1: Tìm đúng mode
             const AnimationEntry* result = _pickByMode(candidates, candCount, mode);
             if (result) return result;
 
+            VPET_LOG_V("GFX", "  Exact mode %u not found, starting fallback...", (uint8_t)mode);
+
             // Tầng 2: Mode=Ill không fallback (dòng 114-117 C#)
-            if (mode == ModeType::Ill) return nullptr;
+            if (mode == ModeType::Ill) {
+                VPET_LOG_V("GFX", "  Mode is Ill, skip fallback.");
+                return nullptr;
+            }
 
             // Tầng 3: Thử mode+1 ("向下兼容", dòng 118-125 C#)
             int nextMode = (int)mode + 1;
             if (nextMode <= (int)ModeType::PoorCondition) {
+                VPET_LOG_V("GFX", "  Trying fallback mode +1: %d", nextMode);
                 result = _pickByMode(candidates, candCount, (ModeType)nextMode);
                 if (result) return result;
             }
@@ -376,20 +408,26 @@ namespace VPet {
             // Tầng 4: Thử mode-1 ("向上兼容", dòng 126-133 C#)
             int prevMode = (int)mode - 1;
             if (prevMode >= (int)ModeType::Happy) {
+                VPET_LOG_V("GFX", "  Trying fallback mode -1: %d", prevMode);
                 result = _pickByMode(candidates, candCount, (ModeType)prevMode);
                 if (result) return result;
             }
 
             // Tầng 5: Bất kỳ mode nào (trừ Ill) — dòng 134-137 C#
+            VPET_LOG_V("GFX", "  Trying any mode fallback (excluding Ill)...");
             const AnimationEntry* nonIll[MAX_ANIMATION_ENTRIES];
             uint16_t nonIllCount = 0;
             for (uint16_t i = 0; i < candCount; i++) {
                 if (candidates[i]->info.modeType != ModeType::Ill)
                     nonIll[nonIllCount++] = candidates[i];
             }
-            if (nonIllCount > 0)
-                return nonIll[Utils::randomInt(nonIllCount)];
+            if (nonIllCount > 0) {
+                const AnimationEntry* picked = nonIll[Utils::randomInt(nonIllCount)];
+                VPET_LOG_V("GFX", "  Picked random fallback candidate: %s", picked->path);
+                return picked;
+            }
 
+            VPET_LOG_E("GFX", "  All fallbacks failed for: %s", name);
             return nullptr;
         }
 

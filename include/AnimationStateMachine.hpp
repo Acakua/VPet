@@ -111,26 +111,36 @@ namespace VPet {
             currentGraphName[0] = '\0';
         }
 
+        // Helper to get state name for logging
+        const char* _animStateName(AnimState s) {
+            switch (s) {
+                case AnimState::Idle: return "Idle";
+                case AnimState::Playing_A_Start: return "A_Start";
+                case AnimState::Playing_B_Loop: return "B_Loop";
+                case AnimState::Playing_C_End: return "C_End";
+                case AnimState::Playing_Single: return "Single";
+                default: return "Unknown";
+            }
+        }
+
+        const char* _workStateName(WorkingState s) {
+            switch (s) {
+                case WorkingState::Normal: return "Normal";
+                case WorkingState::Work: return "Work";
+                case WorkingState::Sleep: return "Sleep";
+                default: return "Unknown";
+            }
+        }
+
         // === CÁC HÀM DISPLAY — PORT TỪ MainDisplay.cs ===
 
-        // ================================================================
-        // displayToNormal() — Quay về animation mặc định theo WorkingState
-        // Port từ: MainDisplay.cs::DisplayToNomal() dòng 28-46
-        //
-        // C# gốc:
-        //   switch (State) {
-        //     case Nomal: DisplayNomal();         // → DisplayDefault()
-        //     case Sleep: DisplaySleep(true);      // → Sleep A→B(force loop)
-        //     case Work:  NowWork.Display(this);   // → Work animation
-        //   }
-        // ================================================================
         void displayToNormal() {
+            VPET_LOG_I("FSM", "Transitioning to normal display. WorkState: %s", _workStateName(workState));
             switch (workState) {
                 case WorkingState::Sleep:
                     displaySleep(true);
                     break;
                 case WorkingState::Work:
-                    // TODO: Implement work animation
                     displayDefault();
                     break;
                 default:
@@ -139,40 +149,29 @@ namespace VPet {
             }
         }
 
-        // ================================================================
-        // displayDefault() — Phát animation Default (thở/đứng yên)
-        // Port từ: MainDisplay.cs::DisplayDefault() dòng 67-71
-        //   C#: CountNomal++; Display(Default, Single, DisplayNomal);
-        // ================================================================
         void displayDefault() {
             countNormal++;
+            VPET_LOG_V("FSM", "Playing default animation (CountNormal: %d)", countNormal);
             _playAnimation(GraphType::Default, AnimatType::Single);
             animState = AnimState::Playing_Single;
         }
 
-        // ================================================================
-        // displayTouchHead() — Xoa đầu: A_Start → B_Loop → C_End
-        // Port từ: MainDisplay.cs::DisplayTouchHead() dòng 128-158
-        //
-        // Logic C# gốc:
-        //   1. Trừ Strength-2, cộng Feeling+1
-        //   2. Nếu đang ở B_Loop cùng loại → SetContinue (kéo dài)
-        //   3. Nếu không → phát A_Start, callback → B_Loop → C_End → Normal
-        // ================================================================
         void displayTouchHead() {
             countNormal = 0;
+            VPET_LOG_I("FSM", "Trigger: Touch Head");
 
             // Tính toán chỉ số (Port dòng 131-136)
             if (save && save->getStrength() >= 10 && save->getFeeling() < GameSave::FEELING_MAX) {
                 save->strengthChange(-2);
                 save->feelingChange(1);
                 save->calculateMode();
+                VPET_LOG_V("PET", "Stats updated - Strength: %d, Feeling: %d", save->getStrength(), save->getFeeling());
             }
 
             // Interrupt check (Port dòng 138-152)
             if (currentGraphType == GraphType::Touch_Head
                 && animState == AnimState::Playing_B_Loop) {
-                // Đang B_Loop Touch_Head → kéo dài
+                VPET_LOG_I("FSM", "Continuing existing TouchHead B_Loop");
                 player->control.setContinue();
                 return;
             }
@@ -181,35 +180,26 @@ namespace VPet {
             _startChain(GraphType::Touch_Head);
         }
 
-        // ================================================================
-        // displayTouchBody() — Chạm thân: tương tự TouchHead
-        // Port từ: MainDisplay.cs::DisplayTouchBody() dòng 166-196
-        // Logic giống 100% TouchHead, chỉ khác GraphType
-        // ================================================================
         void displayTouchBody() {
             countNormal = 0;
+            VPET_LOG_I("FSM", "Trigger: Touch Body");
             if (save && save->getStrength() >= 10 && save->getFeeling() < GameSave::FEELING_MAX) {
                 save->strengthChange(-2);
                 save->feelingChange(1);
                 save->calculateMode();
+                VPET_LOG_V("PET", "Stats updated - Strength: %d, Feeling: %d", save->getStrength(), save->getFeeling());
             }
             if (currentGraphType == GraphType::Touch_Body
                 && animState == AnimState::Playing_B_Loop) {
+                VPET_LOG_I("FSM", "Continuing existing TouchBody B_Loop");
                 player->control.setContinue();
                 return;
             }
             _startChain(GraphType::Touch_Body);
         }
 
-        // ================================================================
-        // displaySleep() — Ngủ
-        // Port từ: MainDisplay.cs::DisplaySleep() dòng 314-325
-        //
-        // C# gốc:
-        //   if (force) { State=Sleep; A_Start → BLoopingForce }
-        //   else       { A_Start → BLoopingToNomal(duration) }
-        // ================================================================
         void displaySleep(bool force = false) {
+            VPET_LOG_I("FSM", "Trigger: Sleep (Force: %d)", force);
             loopTimes = 0;
             countNormal = 0;
             forceLoop = force;
@@ -219,15 +209,14 @@ namespace VPet {
             _startChain(GraphType::Sleep);
         }
 
-        // ================================================================
-        // displayIdel() — Idle animation ngẫu nhiên
-        // Port từ: MainDisplay.cs::DisplayToIdel() dòng 260-294
-        //
-        // C#: random pick từ GraphType.Idel → A_Start → BLoopToNomal(dur)
-        // ================================================================
         bool displayIdel() {
             const char* name = graph->findName(GraphType::Idel);
-            if (!name) return false;
+            if (!name) {
+                VPET_LOG_W("FSM", "No Idle animation found in dictionary!");
+                return false;
+            }
+
+            VPET_LOG_I("FSM", "Trigger: Random Idle (%s)", name);
 
             // Tìm animation A_Start cho Idel
             const AnimationEntry* entry = graph->findGraph(name, AnimatType::A_Start, save->calculateMode());
@@ -254,32 +243,18 @@ namespace VPet {
                 return true;
             }
 
+            VPET_LOG_W("FSM", "Failed to find suitable entry for Idle animation: %s", name);
             return false;
         }
 
-        // ================================================================
-        // displayStateONE() — Idle state 1
-        // Port từ: MainDisplay.cs::DisplayToIdel_StateONE() dòng 200-210
-        // ================================================================
         void displayStateONE() {
+            VPET_LOG_I("FSM", "Trigger: StateONE");
             loopTimes = 0;
             countNormal = 0;
             forceLoop = false;
             _startChain(GraphType::StateONE);
         }
 
-        // ================================================================
-        // tick() — Gọi mỗi vòng loop() — kiểm tra state machine
-        //
-        // Kiểm tra: player đã phát xong chưa?
-        //   → Nếu xong → chuyển sang giai đoạn tiếp theo
-        //   → A_Start xong → B_Loop
-        //   → B_Loop xong → kiểm tra loop count → C_End hoặc loop tiếp
-        //   → C_End xong → displayToNormal()
-        //   → Single xong → displayToNormal()
-        //
-        // Trả về true nếu LVGL cần refresh
-        // ================================================================
         bool tick() {
             if (!player) return false;
 
@@ -288,6 +263,7 @@ namespace VPet {
 
             // Kiểm tra player đã kết thúc animation hiện tại?
             if (player->state == PlayerState::Idle && animState != AnimState::Idle) {
+                VPET_LOG_D("FSM", "Animation finished for state: %s", _animStateName(animState));
                 _onAnimationFinished();
             }
 
@@ -300,21 +276,20 @@ namespace VPet {
         void _onAnimationFinished() {
             switch (animState) {
                 case AnimState::Playing_A_Start:
-                    // A xong → chuyển B_Loop
+                    VPET_LOG_I("FSM", "A_Start finished -> Transitioning to B_Loop");
                     _transitionToBLoop();
                     break;
 
                 case AnimState::Playing_B_Loop:
-                    // B xong → kiểm tra loop
                     if (forceLoop) {
-                        // Port từ: DisplayBLoopingForce (dòng 329-332)
-                        // Loop vô hạn cho Sleep force
+                        VPET_LOG_V("FSM", "B_Loop finished -> Force loop enabled, repeating B_Loop");
                         _playPhase(AnimatType::B_Loop);
                     } else {
-                        // Port từ: DisplayBLoopingToNomal (dòng 302-308)
-                        // C#: if (Rnd.Next(++looptimes) > loopLength) → C_End
                         loopTimes++;
-                        if (Utils::randomInt(loopTimes) > maxLoopLength) {
+                        int rnd = Utils::randomInt(loopTimes);
+                        VPET_LOG_V("FSM", "B_Loop finished -> Loop count: %d/%d (Dice: %d)", loopTimes, maxLoopLength, rnd);
+                        if (rnd > maxLoopLength) {
+                            VPET_LOG_I("FSM", "B_Loop finished -> Dice > maxLoopLength, transitioning to C_End");
                             _transitionToCEnd();
                         } else {
                             _playPhase(AnimatType::B_Loop);
@@ -323,51 +298,50 @@ namespace VPet {
                     break;
 
                 case AnimState::Playing_C_End:
-                    // C xong → quay về Normal
-                    // Port từ: DisplayCEndtoNomal (dòng 410-413)
+                    VPET_LOG_I("FSM", "C_End finished -> Returning to Normal");
                     animState = AnimState::Idle;
                     displayToNormal();
                     break;
 
                 case AnimState::Playing_Single:
-                    // Single xong → quay về Normal
+                    VPET_LOG_I("FSM", "Single animation finished -> Returning to Normal");
                     animState = AnimState::Idle;
                     displayToNormal();
                     break;
 
                 default:
+                    animState = AnimState::Idle;
                     break;
             }
         }
 
-        // Chuyển sang B_Loop
         void _transitionToBLoop() {
             const AnimationEntry* entry = graph->findGraph(
                 currentGraphName, AnimatType::B_Loop, save->calculateMode());
             if (entry) {
+                VPET_LOG_V("FSM", "  Found B_Loop entry: %s", entry->path);
                 _playEntry(entry);
                 animState = AnimState::Playing_B_Loop;
             } else {
-                // Không có B_Loop → skip sang C_End hoặc Normal
+                VPET_LOG_W("FSM", "  B_Loop entry not found for: %s, skipping to C_End", currentGraphName);
                 _transitionToCEnd();
             }
         }
 
-        // Chuyển sang C_End
         void _transitionToCEnd() {
             const AnimationEntry* entry = graph->findGraph(
                 currentGraphName, AnimatType::C_End, save->calculateMode());
             if (entry) {
+                VPET_LOG_V("FSM", "  Found C_End entry: %s", entry->path);
                 _playEntry(entry);
                 animState = AnimState::Playing_C_End;
             } else {
-                // Không có C_End → trực tiếp về Normal
+                VPET_LOG_W("FSM", "  C_End entry not found for: %s, returning to Idle", currentGraphName);
                 animState = AnimState::Idle;
                 displayToNormal();
             }
         }
 
-        // Phát 1 giai đoạn (A/B/C) từ animation hiện tại
         void _playPhase(AnimatType phase) {
             const AnimationEntry* entry = graph->findGraph(
                 currentGraphName, phase, save->calculateMode());
@@ -376,14 +350,15 @@ namespace VPet {
             }
         }
 
-        // Bắt đầu chuỗi A→B→C cho 1 GraphType
         void _startChain(GraphType type) {
             const char* name = graph->findName(type);
             if (!name) {
+                VPET_LOG_W("FSM", "Failed to start chain: No name found for GraphType %u", (uint8_t)type);
                 displayDefault();
                 return;
             }
 
+            VPET_LOG_I("FSM", "Starting animation chain: %s (Type: %u)", name, (uint8_t)type);
             strncpy(currentGraphName, name, 31);
             currentGraphName[31] = '\0';
             currentGraphType = type;
@@ -392,21 +367,23 @@ namespace VPet {
             const AnimationEntry* entry = graph->findGraph(
                 name, AnimatType::A_Start, save->calculateMode());
             if (entry) {
+                VPET_LOG_V("FSM", "  Chain A_Start entry: %s", entry->path);
                 _playEntry(entry);
                 animState = AnimState::Playing_A_Start;
             } else {
-                // Thử Single nếu không có A_Start
+                VPET_LOG_I("FSM", "  A_Start not found, trying Single...");
                 entry = graph->findGraph(name, AnimatType::Single, save->calculateMode());
                 if (entry) {
+                    VPET_LOG_V("FSM", "  Chain Single entry: %s", entry->path);
                     _playEntry(entry);
                     animState = AnimState::Playing_Single;
                 } else {
+                    VPET_LOG_E("FSM", "  No suitable entry found to start chain for: %s", name);
                     displayDefault();
                 }
             }
         }
 
-        // Phát 1 animation entry trên player
         void _playAnimation(GraphType type, AnimatType animat) {
             const char* name = graph->findName(type);
             if (!name) return;
@@ -419,9 +396,9 @@ namespace VPet {
             if (entry) _playEntry(entry);
         }
 
-        // Load + start animation entry trên player
         void _playEntry(const AnimationEntry* entry) {
             if (!entry || !player) return;
+            VPET_LOG_V("FSM", "  Executing play on entry: %s", entry->path);
             player->load(entry->path);
             bool isLoop = (entry->info.animat == AnimatType::B_Loop);
             player->start(isLoop);

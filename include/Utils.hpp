@@ -11,6 +11,39 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+// ========================================================================
+// VPET DEBUG SYSTEM
+// ========================================================================
+#define VPET_DEBUG // Comment out this line to disable ALL debug logs
+
+#ifdef VPET_DEBUG
+    #define VPET_LOG_V(tag, format, ...) log_v("[%s] " format, tag, ##__VA_ARGS__)
+    #define VPET_LOG_D(tag, format, ...) log_d("[%s] " format, tag, ##__VA_ARGS__)
+    #define VPET_LOG_I(tag, format, ...) log_i("[%s] " format, tag, ##__VA_ARGS__)
+    #define VPET_LOG_W(tag, format, ...) log_w("[%s] " format, tag, ##__VA_ARGS__)
+    #define VPET_LOG_E(tag, format, ...) log_e("[%s] " format, tag, ##__VA_ARGS__)
+
+    // Memory Profiling
+    #define VPET_MEM_DUMP(tag) log_i("[%s][MEM] Heap: %u/%u | PSRAM: %u/%u", \
+            tag, \
+            ESP.getHeapSize() - ESP.getFreeHeap(), ESP.getHeapSize(), \
+            ESP.getPsramSize() - ESP.getFreePsram(), ESP.getPsramSize())
+
+    // Execution Timing
+    #define VPET_TIME_START(name) uint32_t _start_##name = millis()
+    #define VPET_TIME_END(name, tag) log_i("[%s][TIME] %s took %lu ms", \
+            tag, #name, millis() - _start_##name)
+#else
+    #define VPET_LOG_V(tag, format, ...)
+    #define VPET_LOG_D(tag, format, ...)
+    #define VPET_LOG_I(tag, format, ...)
+    #define VPET_LOG_W(tag, format, ...)
+    #define VPET_LOG_E(tag, format, ...)
+    #define VPET_MEM_DUMP(tag)
+    #define VPET_TIME_START(name)
+    #define VPET_TIME_END(name, tag)
+#endif
+
 namespace VPet {
 
     // ========================================================================
