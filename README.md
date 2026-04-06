@@ -21,27 +21,27 @@ A high-performance port of the popular **VPet-Simulator** (originally C#/WPF) to
 | **Touch** | Capacitive Touch (FT6336U) |
 | **Storage** | MicroSD Card (1GB+ for animations) |
 
-## 🔌 Hardware Wiring (Sơ đồ đấu dây)
+## 🔌 Hardware Wiring
 
-Đối với mạch **ESP32-S3 DevKitC-1 (N16R8)** và màn hình **ST7796S** tích hợp khe thẻ SD:
+For **ESP32-S3 DevKitC-1 (N16R8)** and **ST7796S** display with integrated SD slot:
 
-| Thành phần | Chân Module | Chân GPIO (S3) | Ghi chú |
+| Component | Module Pin | GPIO Pin (S3) | Note |
 | :--- | :--- | :--- | :--- |
-| **Nguồn** | VCC | 3.3V | |
+| **Power** | VCC | **5V** | **Recommended 5V** for internal LDO |
 | | GND | GND | |
-| **Màn hình & SD** | **SCK** | **7** | Chung bus SPI |
-| | **SDI (MOSI)** | **6** | Chung bus SPI |
-| | **SDO (MISO)** | **5** | Chung bus SPI |
-| | **TFT_CS** | **10** | Chân chọn màn hình |
-| | **SD_CS** | **14** | Chân chọn thẻ SD |
-| | DC (RS) | 11 | |
-| | RESET (RES) | 12 | |
-| | LED (BL) | 13 | Đèn nền |
-| **Cảm ứng (I2C)** | **T_SDA** | **17** | |
-| | **T_SCL** | **18** | |
+| **Shared SPI Bus** | **SCK / SCLK** | **7** | Shared by TFT & SD |
+| | **SDI / MOSI** | **6** | Shared by TFT & SD |
+| | **SDO / MISO** | **5** | Shared by TFT & SD |
+| **Display** | **TFT_CS** | **10** | TFT Chip Select |
+| | DC / RS | 11 | Data/Command |
+| | RESET / RES | 12 | Hardware Reset |
+| | LED / BL | 13 | Backlight Control |
+| **Storage** | **SD_CS** | **14** | SD Card Chip Select |
+| **Touch (I2C)** | **T_SDA** | **17** | I2C Data |
+| | **T_SCL** | **18** | I2C Clock |
 
 > [!CAUTION]
-> Tuyệt đối không sử dụng các chân GPIO 33-37 cho các linh kiện khác vì chúng được dành riêng cho bộ nhớ PSRAM 8MB (OPI) trên phiên bản N16R8.
+> DO NOT use GPIOs 33-37 for peripherals, as they are reserved for the **8MB OPI PSRAM** on the N16R8 variant.
 
 ## 📦 Technical Stack
 
