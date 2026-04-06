@@ -44,6 +44,9 @@ static lv_color_t* buf2;
 // Các con trỏ tổng quan quản lý Pet
 using namespace VPet;
 
+static lv_img_dsc_t pet_img_dsc;
+static lv_obj_t* pet_img_obj = nullptr;
+
 GameSave* gameSave = nullptr;
 GameLoop* gameLoop = nullptr;
 AnimationPlayer* animPlayer = nullptr;
@@ -229,7 +232,19 @@ void setup() {
     lv_obj_t* scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x282c30), LV_PART_MAIN);
 
-    statusBar = new StatusBar(scr);
+    // [NEW] Khởi tạo Widget hiển thị Pet
+    pet_img_dsc.header.always_zero = 0;
+    pet_img_dsc.header.w = 320;
+    pet_img_dsc.header.h = 320;
+    pet_img_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    pet_img_dsc.data_size = 320 * 320 * 2;
+    pet_img_dsc.data = nullptr;
+
+    pet_img_obj = lv_img_create(scr);
+    lv_img_set_src(pet_img_obj, &pet_img_dsc);
+    lv_obj_set_pos(pet_img_obj, 0, 0); // Mặc định ở 0 khi SideBar nằm bên phải
+
+    statusBar = new StatusBar(scr, pet_img_obj);
     workTimer = new WorkTimerDisplay(scr, gameLoop);
     msgBubble = new MessageBubble(scr);
 
@@ -269,8 +284,10 @@ void loop() {
     }
 
     // 3. Xử lý giải nén Frame ảnh và load từ SD liên tục
-    if (animPlayer) {
-        animPlayer->tick();
+    if (animPlayer && animPlayer->tick()) {
+        // [NEW] Cập nhật con trỏ dữ liệu ảnh khi có đổi frame
+        pet_img_dsc.data = animPlayer->currentBuffer();
+        lv_obj_invalidate(pet_img_obj);
     }
 
     // 4. Update số liệu hiển thị trên thanh Toolbars

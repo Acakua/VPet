@@ -10,3 +10,8 @@ CLAUDE.md
 .claude/
 build_log.txt
 docs/
+test/
+
+# Local Tools & Media
+Simulator/
+sdcard_data/

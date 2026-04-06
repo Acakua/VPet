@@ -34,8 +34,8 @@ namespace VPet {
         lv_obj_t* btnSleep;
         lv_obj_t* btnInteract;
 
-        // Constructor khởi tạo giao diện trên 1 parent (thường là lv_scr_act())
-        StatusBar(lv_obj_t* parent);
+        // Constructor khởi tạo giao diện trên 1 parent
+        StatusBar(lv_obj_t* parent, lv_obj_t* petImage);
         ~StatusBar();
 
         // ----------------------------------------------------
@@ -48,6 +48,15 @@ namespace VPet {
         void show();
         void hide();
         bool isVisible() const;
+
+        // Toggle Expand/Collapse SideBar
+        void toggle();
+        bool isCollapsed() const { return collapsed; }
+
+    private:
+        bool collapsed = false;
+        lv_obj_t* btnToggle;     // Nút bấm thu phóng SideBar
+        lv_obj_t* petImage;      // Con trỏ tới widget Pet để dịch chuyển tọa độ
     };
 
 } // namespace VPet
