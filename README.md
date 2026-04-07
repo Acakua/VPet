@@ -25,23 +25,24 @@ A high-performance port of the popular **VPet-Simulator** (originally C#/WPF) to
 
 For **ESP32-S3 DevKitC-1 (N16R8)** and **ST7796S** display with integrated SD slot:
 
-| Component | Module Pin | GPIO Pin (S3) | Note |
+| Component | Nhãn trên Màn hình | GPIO Pin (S3) | Ghi chú |
 | :--- | :--- | :--- | :--- |
-| **Power** | VCC | **5V** | **Recommended 5V** for internal LDO |
-| | GND | GND | |
-| **Shared SPI Bus** | **SCK / SCLK** | **7** | Shared by TFT & SD |
-| | **SDI / MOSI** | **6** | Shared by TFT & SD |
-| | **SDO / MISO** | **5** | Shared by TFT & SD |
-| **Display** | **TFT_CS** | **10** | TFT Chip Select |
-| | DC / RS | 11 | Data/Command |
-| | RESET / RES | 12 | Hardware Reset |
-| | LED / BL | 13 | Backlight Control |
-| **Storage** | **SD_CS** | **14** | SD Card Chip Select |
-| **Touch (I2C)** | **T_SDA** | **17** | I2C Data |
-| | **T_SCL** | **18** | I2C Clock |
+| **Nguồn** | **VCC** | **5V / VBUS** | Ưu tiên nguồn 5V rời |
+| | **GND** | **GND** | Phải nối chung GND |
+| **SPI (Chung)** | **SCK** | **7** | |
+| | **SDI (MOSI)** | **6** | |
+| | **SDO (MISO)** | **5** | |
+| **Display** | **LCD_CS** | **15** | |
+| | **LCD_RS** | **4** | (RS tương đương với DC) |
+| | **LCD_RST** | **1** | Chân mới (An toàn cho OPI) |
+| | **LED** | **21** | Đèn nền (An toàn cho OPI) |
+| **Thẻ nhớ** | **SD_CS** | **14** | |
+| **Cảm ứng** | **CTP_SDA** | **17** | |
+| | **CTP_SCL** | **18** | |
+| | **CTP_RST** | **2** | Reset cảm ứng (Khuyến nghị nối) |
 
 > [!CAUTION]
-> DO NOT use GPIOs 33-37 for peripherals, as they are reserved for the **8MB OPI PSRAM** on the N16R8 variant.
+> DO NOT use GPIOs 33-37 and **47-48** for peripherals on the **N16R8 (OPI PSRAM)** variant, as they are reserved for the high-speed PSRAM interface and differential clock.
 
 ## 📦 Technical Stack
 

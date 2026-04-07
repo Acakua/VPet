@@ -81,6 +81,11 @@ void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *c
 
 // Đọc toạ độ cảm ứng điểm chạm I2C
 void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
+    // TẠM THỜI TẮT: I2C Touch chưa được khởi tạo
+    data->state = LV_INDEV_STATE_REL;
+    return;
+
+    /* --- Code gốc (sẽ bật lại khi I2C Touch hoạt động) ---
     Wire.beginTransmission(I2C_ADDR_FT6336U);
     Wire.write(0x02); // TD_STATUS Register
     if (Wire.endTransmission() != 0) {
@@ -114,6 +119,7 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
+    */
 }
 
 // RTOS Timer cấp heartbeat (Time Base) cho LVGL
@@ -134,41 +140,52 @@ void setup() {
 
     // 1. Phân hệ 4A: Khởi tạo màn hình
     VPET_LOG_I("SYS", "Initializing TFT...");
+    
+    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - API mới cho Arduino v3.x
+    ledcAttach(21, 5000, 8);    // Gắn chân 21 vào PWM, tần số 5kHz, độ phân giải 8-bit
+    ledcWrite(21, 50);          // Độ sáng 20% (50/255)
+    
     tft.begin();
     tft.setRotation(0); 
     tft.fillScreen(TFT_BLACK);
     VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
     
-    // 2. Phân hệ 4B: Khởi tạo chân I2C cho cảm ứng (FT6336U)
-    VPET_LOG_I("SYS", "Initializing I2C Touch...");
-    Wire.begin(TOUCH_SDA, TOUCH_SCL);
-    VPET_LOG_I("SYS", "I2C Touch Driver Ready.");
+    // 2. Phân hệ 4B: Cảm ứng (FT6336U) — TẠM THỜI TẮT
+    // Wire.begin() đang gây crash trên ESP32-S3 khi chân CTP chưa nối đúng.
+    // Sẽ bật lại sau khi xác nhận Display + SD hoạt động ổn định.
+    VPET_LOG_W("SYS", "I2C Touch SKIPPED (debug mode).");
+    yield();
     
-    // 3. Phân hệ 4C: Khởi tạo SD Card
+    // 3. Phân hệ 4C: Khởi tạo SD Card (Shared SPI Bus)
     VPET_LOG_I("SYS", "Initializing SD Card...");
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if(!SD.begin(SD_CS, SPI, 20000000)) {
+    yield();
+    // Khởi tạo Arduino SPI (3 chân, KHÔNG truyền SS để SD lib tự quản lý CS)
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
+    yield();
+    if(!SD.begin(SD_CS, SPI, 4000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
-        VPET_LOG_I("SYS", "SD Card Driver Ready.");
+        VPET_LOG_I("SYS", "SD Card Ready.");
     }
+    yield();
 
     // Khởi tạo Graphic System (LVGL)
     VPET_LOG_I("SYS", "Initializing LVGL...");
     lv_init();
     lv_log_register_print_cb(my_log_cb);
 
-    // 4. Cấp phát Memory cho Framebuffer (PSRAM)
-    VPET_LOG_I("SYS", "Allocating Framebuffers in PSRAM...");
-    uint32_t bufSize = screenWidth * 60; // 60 line ~ khoảng 38KB mỗi buffer
-    buf1 = (lv_color_t*)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
-    buf2 = (lv_color_t*)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    // 4. Cấp phát Memory cho Framebuffer (Internal RAM — PSRAM tạm tắt)
+    VPET_LOG_I("SYS", "Allocating Framebuffers in Internal RAM...");
+    uint32_t bufSize = screenWidth * 20; // 20 lines = ~12.5KB (vừa đủ trong Internal RAM)
+    buf1 = (lv_color_t*)malloc(bufSize * sizeof(lv_color_t));
+    buf2 = NULL; // Single buffer mode để tiết kiệm RAM
     
-    if (!buf1 || !buf2) {
-        VPET_LOG_E("SYS", "Framebuffer allocation failed!");
-    } else {
-        VPET_LOG_I("SYS", "Framebuffers allocated successfully.");
+    if (!buf1) {
+        VPET_LOG_E("SYS", "Framebuffer allocation FAILED! Halting.");
+        while(1) { delay(1000); }
     }
+    VPET_LOG_I("SYS", "Framebuffer OK (%u bytes).", bufSize * sizeof(lv_color_t));
+    yield();
     
     lv_disp_draw_buf_init(&draw_buf, buf1, buf2, bufSize);
 
@@ -202,115 +219,23 @@ void setup() {
     esp_timer_start_periodic(periodic_timer, 5000); // Trigger mổi 5000 us (5ms)
 
     // ==============================================
-    // KHỞI TẠO LOGIC VPET VÀ COMPONENT
+    // MINIMAL TEST: Chỉ vẽ một nhãn chữ lên màn hình
+    // Toàn bộ VPet Logic (GameSave, GraphCore, AnimPlayer...) TẠM TẮT
     // ==============================================
-    VPET_LOG_I("SYS", "Initializing VPet Logic...");
-    gameSave = new GameSave();
-    
-    // Tải dữ liệu lưu trước đó thẻ SD (Phân hệ 4D)
-    VPET_LOG_I("SYS", "Loading Save Data...");
-    if (!gameSave->load("/savedata.bin")) {
-        VPET_LOG_W("SYS", "No save file found, creating a new pet...");
-        gameSave->initNewGame("V-Pet");
-        gameSave->money = 1500.50; // Mock Start Money
-    } else {
-        VPET_LOG_I("SYS", "Save file loaded successfully.");
-    }
-    
-    graphCore = new GraphCore();
-    animPlayer = new AnimationPlayer(); 
-    animFSM = new AnimationStateMachine();
-    
-    // Liên kết các module
-    animFSM->graph = graphCore;
-    animFSM->save = gameSave;
-    animFSM->player = animPlayer;
-    
-    gameLoop = new GameLoop(gameSave, animFSM);
-
-    // Khởi tạo các Component giao diện lên lớp LVGL Active màn hình
     lv_obj_t* scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x282c30), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), LV_PART_MAIN);
+    
+    lv_obj_t* label = lv_label_create(scr);
+    lv_label_set_text(label, "VPet ESP32\nDisplay OK!");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_center(label);
 
-    // [NEW] Khởi tạo Widget hiển thị Pet
-    pet_img_dsc.header.always_zero = 0;
-    pet_img_dsc.header.w = 320;
-    pet_img_dsc.header.h = 320;
-    pet_img_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
-    pet_img_dsc.data_size = 320 * 320 * 2;
-    pet_img_dsc.data = nullptr;
-
-    pet_img_obj = lv_img_create(scr);
-    lv_img_set_src(pet_img_obj, &pet_img_dsc);
-    lv_obj_set_pos(pet_img_obj, 0, 0); // Mặc định ở 0 khi SideBar nằm bên phải
-
-    statusBar = new StatusBar(scr, pet_img_obj);
-    workTimer = new WorkTimerDisplay(scr, gameLoop);
-    msgBubble = new MessageBubble(scr);
-
-    // Test thử UI ban đầu
-    statusBar->show();
-    msgBubble->show("VPet-System", "Khởi động thành công! Module đang chờ load dữ liệu.", 5000);
-
-    VPET_LOG_I("SYS", "--- VPet ESP32 All System Init Done ---");
+    VPET_LOG_I("SYS", "--- MINIMAL BOOT COMPLETE ---");
     VPET_MEM_DUMP("SYS");
 }
 
 void loop() {
-    static uint32_t lastSaveTime = millis();
-    static uint32_t lastHeartbeat = 0;
-
-    // Heartbeat log every 10 seconds
-    if (millis() - lastHeartbeat >= 10000) {
-        VPET_LOG_I("SYS", "Heartbeat - System Running...");
-        VPET_MEM_DUMP("SYS");
-        
-        // In thêm stats của Pet để debug logic
-        if (gameSave) {
-            VPET_LOG_I("PET", "Stats Debug: HP:%.1f, Hunger:%.1f, Thirst:%.1f, Money:%.1f", 
-                      gameSave->getHealth(), gameSave->getStrengthFood(), 
-                      gameSave->getStrengthDrink(), gameSave->money);
-        }
-        
-        lastHeartbeat = millis();
-    }
-
-    // 1. Core tick điều hoà việc Render UI và event click
     lv_timer_handler();
-    
-    // 2. Timers sinh tồn của Pet (Cộng trừ đói khát / 15s check)
-    if (gameLoop) {
-        gameLoop->tick();
-    }
-
-    // 3. Xử lý giải nén Frame ảnh và load từ SD liên tục
-    if (animPlayer && animPlayer->tick()) {
-        // [NEW] Cập nhật con trỏ dữ liệu ảnh khi có đổi frame
-        pet_img_dsc.data = animPlayer->currentBuffer();
-        lv_obj_invalidate(pet_img_obj);
-    }
-
-    // 4. Update số liệu hiển thị trên thanh Toolbars
-    if (statusBar) {
-        statusBar->update(gameSave);
-    }
-    
-    // 5. Cập nhật các UI Tick-driven
-    if (workTimer) workTimer->tick();
-    if (msgBubble) msgBubble->tick();
-
-    // 6. Auto-Save mỗi 5 phút (300,000 ms)
-    if (millis() - lastSaveTime >= 300000) {
-        VPET_LOG_I("SYS", "Initiating Auto-Save...");
-        if (gameSave && gameSave->save("/savedata.bin")) {
-            VPET_LOG_I("SYS", "Auto-saved game state to SD Card.");
-            if (msgBubble) msgBubble->show("System", "Đã tự động lưu thành công!", 3000);
-        } else {
-            VPET_LOG_E("SYS", "Auto-save failed!");
-        }
-        lastSaveTime = millis();
-    }
-
-    // Prevent Watchdog timeout & Cho phép RTOS breath
     delay(5);
 }

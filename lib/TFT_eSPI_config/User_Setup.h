@@ -22,22 +22,22 @@
 #ifdef TFT_CS
   #undef TFT_CS
 #endif
-#define TFT_CS   10
+#define TFT_CS   15
 
 #ifdef TFT_DC
   #undef TFT_DC
 #endif
-#define TFT_DC   11
+#define TFT_DC   4
 
 #ifdef TFT_RST
   #undef TFT_RST
 #endif
-#define TFT_RST  12
+#define TFT_RST  1
 
 #ifdef TFT_BL
   #undef TFT_BL
 #endif
-#define TFT_BL   13 // Backlight
+#define TFT_BL   21 // Backlight
 
 // Enable SPI DMA
 #define USE_HSPI_PORT
