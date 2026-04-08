@@ -70,6 +70,12 @@ void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *c
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
 
+    static uint32_t flush_count = 0;
+    if (flush_count++ % 50 == 0) {
+        VPET_LOG_I("GFX", "lv_disp_flush called, area: [%d,%d] -> [%d,%d], w:%u, h:%u", 
+                   area->x1, area->y1, area->x2, area->y2, w, h);
+    }
+
     tft.startWrite();
     tft.setAddrWindow(area->x1, area->y1, w, h);
     // Tính năng PushColors tối ưu của TFT_eSPI sẽ đẩy DMA (nếu bật DMA)
@@ -138,104 +144,127 @@ void setup() {
     VPET_LOG_I("SYS", "--- VPet ESP32 Boot Sequence Initiated ---");
     VPET_MEM_DUMP("SYS");
 
-    // 1. Phân hệ 4A: Khởi tạo màn hình
-    VPET_LOG_I("SYS", "Initializing TFT...");
-    
-    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - API mới cho Arduino v3.x
-    ledcAttach(21, 5000, 8);    // Gắn chân 21 vào PWM, tần số 5kHz, độ phân giải 8-bit
-    ledcWrite(21, 50);          // Độ sáng 20% (50/255)
-    
-    tft.begin();
-    tft.setRotation(0); 
-    tft.fillScreen(TFT_BLACK);
-    VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
-    
-    // 2. Phân hệ 4B: Cảm ứng (FT6336U) — TẠM THỜI TẮT
-    // Wire.begin() đang gây crash trên ESP32-S3 khi chân CTP chưa nối đúng.
-    // Sẽ bật lại sau khi xác nhận Display + SD hoạt động ổn định.
-    VPET_LOG_W("SYS", "I2C Touch SKIPPED (debug mode).");
-    yield();
-    
-    // 3. Phân hệ 4C: Khởi tạo SD Card (Shared SPI Bus)
-    VPET_LOG_I("SYS", "Initializing SD Card...");
-    yield();
-    // Khởi tạo Arduino SPI (3 chân, KHÔNG truyền SS để SD lib tự quản lý CS)
+    // 1. Manual Reset cho màn hình (GPIO 1) để đảm bảo controller tỉnh dậy sạch sẽ
+    pinMode(1, OUTPUT);
+    digitalWrite(1, LOW);
+    delay(100);
+    digitalWrite(1, HIGH);
+    delay(200);
+
+    // 2. Khởi tạo Bus SPI (Chung cho SD và TFT)
     SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
     yield();
-    if(!SD.begin(SD_CS, SPI, 4000000)) {
+
+    // 3. KHỞI TẠO SD CARD 
+    VPET_LOG_I("SYS", "Initializing SD Card...");
+    if (!SD.begin(SD_CS, SPI, 4000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
         VPET_LOG_I("SYS", "SD Card Ready.");
     }
     yield();
 
-    // Khởi tạo Graphic System (LVGL)
+    // 4. NẠP DỮ LIỆU GAME & ĐỒ HỌA (Ưu tiên nạp trước khi bật màn hình để tránh noise SPI)
+    VPET_LOG_I("SYS", "Initializing GameSave...");
+    gameSave = new GameSave();
+    if (!gameSave->load("/savedata.bin")) {
+        VPET_LOG_W("SYS", "No save file found, creating a new pet...");
+        gameSave->initNewGame("V-Pet");
+    }
+    yield();
+
+    VPET_LOG_I("SYS", "Initializing GraphCore (SD Scan)...");
+    graphCore = new GraphCore();
+    if (!graphCore->load("/pet")) {
+        VPET_LOG_E("SYS", "Failed to load animation dictionary from SD!");
+    } else {
+        VPET_LOG_I("SYS", "GraphCore OK. Found %u animations.", graphCore->entryCount);
+    }
+    yield();
+
+    // 5. KHỞI TẠO MÀN HÌNH (Bật sau khi đã xong các tác vụ SPI nặng)
+    VPET_LOG_I("SYS", "Initializing TFT...");
+    tft.begin();
+    tft.setRotation(0); 
+    tft.fillScreen(TFT_BLUE); // Đổi sang màu Xanh để nhận biết màn hình đã khởi tạo thành công
+    
+    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - Đẩy tối đa 100%
+    ledcAttach(21, 5000, 8);
+    ledcWrite(21, 255); 
+    VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
+
+    // 6. KHỞI TẠO LVGL
     VPET_LOG_I("SYS", "Initializing LVGL...");
     lv_init();
     lv_log_register_print_cb(my_log_cb);
 
-    // 4. Cấp phát Memory cho Framebuffer (Internal RAM — PSRAM tạm tắt)
     VPET_LOG_I("SYS", "Allocating Framebuffers in Internal RAM...");
-    uint32_t bufSize = screenWidth * 20; // 20 lines = ~12.5KB (vừa đủ trong Internal RAM)
-    buf1 = (lv_color_t*)malloc(bufSize * sizeof(lv_color_t));
-    buf2 = NULL; // Single buffer mode để tiết kiệm RAM
+    // Sử dụng Double Buffer nhẹ trên Internal RAM
+    uint32_t bufSize = screenWidth * 20;
+    buf1 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    buf2 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     
-    if (!buf1) {
-        VPET_LOG_E("SYS", "Framebuffer allocation FAILED! Halting.");
-        while(1) { delay(1000); }
+    if (buf1 && buf2) {
+        lv_disp_draw_buf_init(&draw_buf, buf1, buf2, bufSize);
+
+        static lv_disp_drv_t disp_drv;
+        lv_disp_drv_init(&disp_drv);
+        disp_drv.hor_res = screenWidth;
+        disp_drv.ver_res = screenHeight;
+        disp_drv.flush_cb = my_disp_flush;
+        disp_drv.draw_buf = &draw_buf;
+        lv_disp_drv_register(&disp_drv);
+
+        // Kích hoạt Touch System Input (Tạm thời REL để debug screen)
+        static lv_indev_drv_t indev_drv;
+        lv_indev_drv_init(&indev_drv);
+        indev_drv.type = LV_INDEV_TYPE_POINTER;
+        indev_drv.read_cb = my_touchpad_read;
+        lv_indev_drv_register(&indev_drv);
+
+        // Timer cho LVGL (RTOS Timer)
+        const esp_timer_create_args_t periodic_timer_args = {
+            .callback = &lv_tick_task,
+            .arg = NULL,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "lv_tick"
+        };
+        esp_timer_handle_t periodic_timer;
+        esp_timer_create(&periodic_timer_args, &periodic_timer);
+        esp_timer_start_periodic(periodic_timer, 5000);
+
+        // Giao diện Minimal UI để xác nhận màn hình hoạt động
+        lv_obj_t* scr = lv_scr_act();
+        lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), LV_PART_MAIN);
+        
+        lv_obj_t* label = lv_label_create(scr);
+        if (graphCore && graphCore->entryCount > 0) {
+            lv_label_set_text_fmt(label, "VPet ESP32\nDisplay OK!\nPet: %s\nAnims: %u", 
+                               gameSave->name, graphCore->entryCount);
+        } else {
+            lv_label_set_text(label, "VPet ESP32\nSD Ready\nData Load Fail!");
+        }
+        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+
+        // StatusBar (Tạm ẩn)
+        statusBar = new StatusBar(scr, nullptr);
     }
-    VPET_LOG_I("SYS", "Framebuffer OK (%u bytes).", bufSize * sizeof(lv_color_t));
-    yield();
-    
-    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, bufSize);
 
-    // Kích hoạt Graphic Rendering Pipe
-    static lv_disp_drv_t disp_drv;
-    lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = screenWidth;
-    disp_drv.ver_res = screenHeight;
-    disp_drv.flush_cb = my_disp_flush;
-    disp_drv.draw_buf = &draw_buf;
-    disp_drv.full_refresh = 0;
-    lv_disp_drv_register(&disp_drv);
-
-    // Kích hoạt Touch System Input
-    static lv_indev_drv_t indev_drv;
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb = my_touchpad_read;
-    lv_indev_drv_register(&indev_drv);
-
-    // Rẽ nhánh RTOS cho lv_tick độc lập
-    const esp_timer_create_args_t periodic_timer_args = {
-        .callback = &lv_tick_task,
-        .arg = NULL,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "lv_tick",
-        .skip_unhandled_events = true
-    };
-    esp_timer_handle_t periodic_timer;
-    esp_timer_create(&periodic_timer_args, &periodic_timer);
-    esp_timer_start_periodic(periodic_timer, 5000); // Trigger mổi 5000 us (5ms)
-
-    // ==============================================
-    // MINIMAL TEST: Chỉ vẽ một nhãn chữ lên màn hình
-    // Toàn bộ VPet Logic (GameSave, GraphCore, AnimPlayer...) TẠM TẮT
-    // ==============================================
-    lv_obj_t* scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), LV_PART_MAIN);
-    
-    lv_obj_t* label = lv_label_create(scr);
-    lv_label_set_text(label, "VPet ESP32\nDisplay OK!");
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_center(label);
-
-    VPET_LOG_I("SYS", "--- MINIMAL BOOT COMPLETE ---");
+    VPET_LOG_I("SYS", "--- STEP 3 COMPLETE ---");
     VPET_MEM_DUMP("SYS");
 }
 
 void loop() {
     lv_timer_handler();
+    
+    static uint32_t lastUpdate = 0;
+    if (statusBar && gameSave && millis() - lastUpdate > 1000) {
+        // statusBar->update(gameSave);
+        lastUpdate = millis();
+    }
+    
     delay(5);
 }
