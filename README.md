@@ -17,7 +17,7 @@ A high-performance port of the popular **VPet-Simulator** (originally C#/WPF) to
 | Component | specification |
 | :--- | :--- |
 | **MCU** | ESP32-S3 (N16R8) - 16MB Flash, 8MB PSRAM |
-| **Display** | 4.0" IPS TFT (480x320, ST7796S Driver) |
+| **Display** | MSP4031 4.0" IPS TFT (480x320, ST7796S Driver) |
 | **Touch** | Capacitive Touch (FT6336U) |
 | **Storage** | MicroSD Card (1GB+ for animations) |
 
