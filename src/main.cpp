@@ -29,6 +29,7 @@
 #define SD_MISO 5
 #define SD_SCK  7
 #define TFT_RST_PIN 2 // Moved from GPIO 1 (TX0) to GPIO 2 to avoid Serial noise
+#define TOUCH_RST   10 // Reset pin for CTP (Remapped to avoid conflict with TFT_RST)
 
 // Khởi tạo các Hardware Object
 TFT_eSPI tft = TFT_eSPI(); 

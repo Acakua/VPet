@@ -34,12 +34,12 @@ For **ESP32-S3 DevKitC-1 (N16R8)** and **ST7796S** display with integrated SD sl
 | | **SDO (MISO)** | **5** | |
 | **Display** | **LCD_CS** | **15** | |
 | | **LCD_RS** | **4** | (RS tương đương với DC) |
-| | **LCD_RST** | **1** | Chân mới (An toàn cho OPI) |
-| | **LED** | **21** | Đèn nền (An toàn cho OPI) |
+| | **LCD_RST** | **2** | Chân mới (Tránh nhiễu TX0) |
+| **LED** | **21** | Đèn nền (An toàn cho OPI) |
 | **Thẻ nhớ** | **SD_CS** | **14** | |
 | **Cảm ứng** | **CTP_SDA** | **17** | |
 | | **CTP_SCL** | **18** | |
-| | **CTP_RST** | **2** | Reset cảm ứng (Khuyến nghị nối) |
+| | **CTP_RST** | **10** | Reset cảm ứng (GPIO rời) |
 
 > [!CAUTION]
 > DO NOT use GPIOs 33-37 and **47-48** for peripherals on the **N16R8 (OPI PSRAM)** variant, as they are reserved for the high-speed PSRAM interface and differential clock.
