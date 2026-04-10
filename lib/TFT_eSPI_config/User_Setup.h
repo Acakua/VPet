@@ -34,7 +34,7 @@
 #ifdef TFT_RST
   #undef TFT_RST
 #endif
-#define TFT_RST  1
+#define TFT_RST  2
 
 #ifdef TFT_BL
   #undef TFT_BL
@@ -42,7 +42,7 @@
 #define TFT_BL   21 // Backlight
 
 // Enable SPI DMA
-// #define USE_HSPI_PORT
+#define USE_HSPI_PORT
 #define SPI_FREQUENCY  27000000
 #define SPI_READ_FREQUENCY  20000000
 #define SPI_TOUCH_FREQUENCY  2500000

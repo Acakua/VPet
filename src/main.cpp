@@ -28,6 +28,7 @@
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_SCK  7
+#define TFT_RST_PIN 2 // Moved from GPIO 1 (TX0) to GPIO 2 to avoid Serial noise
 
 // Khởi tạo các Hardware Object
 TFT_eSPI tft = TFT_eSPI(); 
@@ -144,11 +145,12 @@ void setup() {
     VPET_LOG_I("SYS", "--- VPet ESP32 Boot Sequence Initiated ---");
     VPET_MEM_DUMP("SYS");
 
-    // 1. Manual Reset cho màn hình (GPIO 1) để đảm bảo controller tỉnh dậy sạch sẽ
-    pinMode(1, OUTPUT);
-    digitalWrite(1, LOW);
+    // 1. Manual Reset cho màn hình (GPIO 2) để đảm bảo controller tỉnh dậy sạch sẽ
+    // Không dùng GPIO 1 vì trùng Serial TX, gây nhiễu log.
+    pinMode(TFT_RST_PIN, OUTPUT);
+    digitalWrite(TFT_RST_PIN, LOW);
     delay(100);
-    digitalWrite(1, HIGH);
+    digitalWrite(TFT_RST_PIN, HIGH);
     delay(200);
 
     // 2. Khởi tạo Bus SPI (Chung cho SD và TFT)
@@ -182,15 +184,30 @@ void setup() {
     }
     yield();
 
+    // 4c. PHỤC HỒI SPI BUS SAU SD SCAN NẶNG
+    // Recursive scan mở/đóng hàng trăm file handles, gây lỗi SD card
+    // (no token received, Card Failed) → SPI bus ở trạng thái không xác định.
+    // Phải reset SPI trước khi TFT init, nếu không tft.begin() sẽ crash
+    // với StoreProhibited tại EXCVADDR=0x10 (null SPI peripheral pointer).
+    VPET_LOG_I("SYS", "Recovering SPI bus after SD scan...");
+    digitalWrite(SD_CS, HIGH);   // Đảm bảo SD CS deasserted
+    SPI.end();                   // Giải phóng SPI peripheral
+    delay(50);                   // Cho bus ổn định
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // Re-init SPI với đúng pinout
+    delay(50);
+    VPET_LOG_I("SYS", "SPI bus recovered.");
+    yield();
+
     // 5. KHỞI TẠO MÀN HÌNH (Bật sau khi đã xong các tác vụ SPI nặng)
     VPET_LOG_I("SYS", "Initializing TFT...");
     tft.begin();
     tft.setRotation(0); 
     tft.fillScreen(TFT_BLUE); // Đổi sang màu Xanh để nhận biết màn hình đã khởi tạo thành công
     
-    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - Đẩy tối đa 100%
-    ledcAttach(21, 5000, 8);
-    ledcWrite(21, 255); 
+    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - Tương thích Core 2.0 (Platform 6.6.0)
+    ledcSetup(0, 5000, 8);  // Channel 0, 5kHz, 8-bit resolution
+    ledcAttachPin(21, 0);   // Attach GPIO 21 to Channel 0
+    ledcWrite(0, 255);      // Đẩy tối đa 100% độ sáng
     VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
 
     // 6. KHỞI TẠO LVGL
@@ -247,10 +264,44 @@ void setup() {
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-
         // StatusBar (Tạm ẩn)
-        statusBar = new StatusBar(scr, nullptr);
+        // statusBar = new StatusBar(scr, nullptr);
+
+        // ===================================
+        // PHASE 1: Wiring AnimationPlayer
+        // ===================================
+
+        // 1. Tạo lv_img widget cho Pet (320x320 pixel, bên trái màn hình)
+        pet_img_obj = lv_img_create(lv_scr_act());
+        lv_obj_set_pos(pet_img_obj, 0, 80);   // Y=80 để tránh đè StatusBar tương lai
+        lv_obj_set_size(pet_img_obj, 320, 320);
+
+        // Cấu hình lv_img_dsc trỏ vào PSRAM buffer (sẽ swap mỗi frame)
+        pet_img_dsc.header.always_zero = 0;
+        pet_img_dsc.header.cf     = LV_IMG_CF_TRUE_COLOR;
+        pet_img_dsc.header.w      = 320;
+        pet_img_dsc.header.h      = 320;
+        pet_img_dsc.data_size     = 320 * 320 * 2;
+        pet_img_dsc.data          = nullptr;  // Sẽ được animPlayer set
+
+        // 2. Tạo AnimationPlayer
+        animPlayer = new AnimationPlayer();
+        animPlayer->lvglImgDesc = &pet_img_dsc;
+
+        // 3. Tìm animation Default đầu tiên từ GraphCore
+        if (graphCore && graphCore->entryCount > 0) {
+            const char* defaultName = graphCore->findName(GraphType::Default);
+            if (!defaultName) defaultName = "Default";
+            ModeType mode = gameSave ? gameSave->calculateMode() : ModeType::Normal;
+            const AnimationEntry* entry = graphCore->findGraph(defaultName, AnimatType::B_Loop, mode);
+            if (entry) {
+                VPET_LOG_I("SYS", "Starting default animation: %s", entry->path);
+                animPlayer->load(entry->path);
+                animPlayer->start(true);  // isLoop = true (B_Loop)
+            } else {
+                VPET_LOG_W("SYS", "Default animation not found!");
+            }
+        }
     }
 
     VPET_LOG_I("SYS", "--- STEP 3 COMPLETE ---");
@@ -260,6 +311,18 @@ void setup() {
 void loop() {
     lv_timer_handler();
     
+    // Phase 1: AnimationPlayer tick
+    if (animPlayer && animPlayer->tick()) {
+        // Frame mới sẵn sàng → cập nhật LVGL
+        if (animPlayer->currentBuffer()) {
+            pet_img_dsc.data = animPlayer->currentBuffer();
+            lv_img_set_src(pet_img_obj, &pet_img_dsc);
+            lv_obj_invalidate(pet_img_obj);
+            // Ghi đè label để thấy rõ background không bị che khuất
+            lv_obj_move_foreground(pet_img_obj);
+        }
+    }
+
     static uint32_t lastUpdate = 0;
     if (statusBar && gameSave && millis() - lastUpdate > 1000) {
         // statusBar->update(gameSave);

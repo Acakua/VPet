@@ -195,20 +195,11 @@ namespace VPet {
                 return false;
             }
 
-            // 1. Quét các GraphName (Default, Eat, ...)
-            File graphDir = rootDir.openNextFile();
-            while (graphDir) {
-                if (graphDir.isDirectory()) {
-                    const char* graphName = graphDir.name();
-                    // Bỏ qua thư mục ẩn/hệ thống
-                    if (graphName[0] != '.') {
-                        VPET_LOG_V("SD", "Scanning graph category: %s", graphName);
-                        _scanModeFolders(graphDir, graphName);
-                    }
-                }
-                graphDir.close();
-                graphDir = rootDir.openNextFile();
-            }
+            // 1. Quét đệ quy toàn bộ thư mục /pet
+            char rootPath[160];
+            snprintf(rootPath, sizeof(rootPath), "%s", root);
+            _scanRecursive(rootDir, rootPath);
+            
             rootDir.close();
             
             VPET_TIME_END(SDScan, "SD");
@@ -216,74 +207,105 @@ namespace VPet {
             return entryCount > 0;
         }
 
-    private:
-        // Quét các ModeName (Nomal, Happy, ...)
-        void _scanModeFolders(File& graphDir, const char* graphName) {
-            File modeDir = graphDir.openNextFile();
-            while (modeDir) {
-                if (modeDir.isDirectory()) {
-                    const char* modeName = modeDir.name();
-                    VPET_LOG_V("SD", "  Found mode folder: %s", modeName);
-                    _scanAnimatFolders(modeDir, graphName, modeName);
-                }
-                modeDir.close();
-                modeDir = graphDir.openNextFile();
-            }
-        }
+        // Đệ quy tìm tất cả các thư mục chứa file .bin
+        void _scanRecursive(File& dir, const char* currentPath) {
+            File entry = dir.openNextFile();
+            bool hasBinFiles = false;
+            uint16_t binCount = 0;
 
-        // Quét các AnimatIndex (1, 2, 3, 4)
-        void _scanAnimatFolders(File& modeDir, const char* graphName, const char* modeName) {
-            File animatDir = modeDir.openNextFile();
-            while (animatDir) {
-                if (animatDir.isDirectory()) {
-                    const char* animatIdxStr = animatDir.name();
-                    uint8_t animatIdx = (uint8_t)atoi(animatIdxStr);
-                    
-                    if (animatIdx >= 1 && animatIdx <= 4) {
-                        _registerAnimation(animatDir, graphName, modeName, animatIdx);
-                    } else {
-                        VPET_LOG_W("SD", "    Skipping unknown animat folder: %s", animatIdxStr);
+            while (entry) {
+                if (entry.isDirectory()) {
+                    char nextPath[160];
+                    snprintf(nextPath, sizeof(nextPath), "%s/%s", currentPath, entry.name());
+                    File subDir = SD.open(nextPath);
+                    if (subDir) {
+                        _scanRecursive(subDir, nextPath);
+                        subDir.close();
                     }
-                }
-                animatDir.close();
-                animatDir = modeDir.openNextFile();
-            }
-        }
-
-        // Đăng ký 1 thư mục chứa các file .bin làm 1 AnimationEntry
-        void _registerAnimation(File& animatDir, const char* graphName, 
-                               const char* modeName, uint8_t animatIdx) {
-            // Xác định metadata
-            GraphInfo info;
-            strncpy(info.name, graphName, 31);
-            info.type = _parseGraphType(graphName);
-            info.modeType = _parseModeType(modeName);
-            info.animat = (AnimatType)(animatIdx - 1); // 1->A_Start (0), 2->B_Loop (1), ...
-
-            // Tạo đường dẫn đầy đủ từ root (ví dụ: /pet/Default/Nomal/1)
-            char fullPath[128];
-            snprintf(fullPath, sizeof(fullPath), "/pet/%s/%s/%u", graphName, modeName, animatIdx);
-
-            // Đếm số lượng frame trong thư mục (đơn giản hóa: lấy entry đầu tiên của .bin)
-            uint16_t frames = 0;
-            File f = animatDir.openNextFile();
-            while (f) {
-                if (!f.isDirectory()) {
-                    // Kiểm tra xem có phải file .bin không
-                    const char* fname = f.name();
+                } else {
+                    const char* fname = entry.name();
                     if (strstr(fname, ".bin")) {
-                        frames++;
+                        hasBinFiles = true;
+                        binCount++;
                     }
                 }
-                f.close();
-                f = animatDir.openNextFile();
+                entry.close();
+                entry = dir.openNextFile();
             }
 
-            if (frames > 0) {
-                VPET_LOG_I("SD", "    Registered: %s/%s/%u -> %u frames", graphName, modeName, animatIdx, frames);
-                addGraph(AnimationEntry(fullPath, info, frames, 100));
-            } else {
-                VPET_LOG_W("SD", "    No .bin frames found in: %s", fullPath);
+            if (hasBinFiles) {
+                _registerAnimationPath(currentPath, binCount);
+            }
+        }
+
+        // Đăng ký 1 đường dẫn đã xác nhận có file .bin
+        void _registerAnimationPath(const char* fullPath, uint16_t frames) {
+            GraphInfo info;
+            _parseGraphInfo(fullPath, info);
+
+            VPET_LOG_I("SD", "    Registered: [%s] -> Type:%u Name:%s Mode:%u Animat:%u Frames:%u", 
+                       fullPath, (uint8_t)info.type, info.name, (uint8_t)info.modeType, (uint8_t)info.animat, frames);
+            
+            addGraph(AnimationEntry(fullPath, info, frames, 100)); // duration_ms sẽ đc parse lúc load frames
+        }
+
+        // Logic parse thông minh hỗ trợ cả 2 cấu trúc thư mục của VPet
+        void _parseGraphInfo(const char* fullPath, GraphInfo& outInfo) {
+            // fullPath có dạng: /pet/Default/Nomal/1 hoặc /pet/Drink/Happy/back_lay
+            char pathCopy[160];
+            strncpy(pathCopy, fullPath, sizeof(pathCopy) - 1);
+            pathCopy[sizeof(pathCopy) - 1] = '\0';
+
+            char* segments[10];
+            int segCount = 0;
+
+            char* token = strtok(pathCopy, "/");
+            while (token != nullptr && segCount < 10) {
+                if (strcmp(token, "pet") != 0) { // Bỏ qua root
+                    segments[segCount++] = token;
+                }
+                token = strtok(nullptr, "/");
+            }
+
+            if (segCount == 0) return;
+
+            // Segment 0 luôn là GraphType
+            outInfo.type = _parseGraphType(segments[0]);
+            strncpy(outInfo.name, segments[0], 31);
+            outInfo.name[31] = '\0';
+            outInfo.modeType = ModeType::Normal;
+            outInfo.animat = AnimatType::Single;
+
+            // Xử lý các segment còn lại
+            for (int i = 1; i < segCount; i++) {
+                const char* seg = segments[i];
+                bool matchedNumeric = false;
+
+                // Numeric animat (1, 2, 3, 4)
+                if (strcmp(seg, "1") == 0) { outInfo.animat = AnimatType::A_Start; matchedNumeric = true; }
+                else if (strcmp(seg, "2") == 0) { outInfo.animat = AnimatType::B_Loop; matchedNumeric = true; }
+                else if (strcmp(seg, "3") == 0) { outInfo.animat = AnimatType::C_End; matchedNumeric = true; }
+                else if (strcmp(seg, "4") == 0) { outInfo.animat = AnimatType::Single; matchedNumeric = true; }
+                
+                bool containsPrefix = false;
+                if (!matchedNumeric) {
+                    if (strncmp(seg, "A_", 2) == 0) { outInfo.animat = AnimatType::A_Start; containsPrefix = true; }
+                    else if (strncmp(seg, "B_", 2) == 0) { outInfo.animat = AnimatType::B_Loop; containsPrefix = true; }
+                    else if (strncmp(seg, "C_", 2) == 0) { outInfo.animat = AnimatType::C_End; containsPrefix = true; }
+                    else if (strncmp(seg, "Single_", 7) == 0) { outInfo.animat = AnimatType::Single; containsPrefix = true; }
+                }
+
+                bool exactMode = false;
+                if (strstr(seg, "Happy")) { outInfo.modeType = ModeType::Happy; exactMode = (strcmp(seg, "Happy") == 0); }
+                else if (strstr(seg, "Nomal")) { outInfo.modeType = ModeType::Normal; exactMode = (strcmp(seg, "Nomal") == 0); }
+                else if (strstr(seg, "Ill")) { outInfo.modeType = ModeType::Ill; exactMode = (strcmp(seg, "Ill") == 0); }
+                else if (strstr(seg, "PoorCondition")) { outInfo.modeType = ModeType::PoorCondition; exactMode = (strcmp(seg, "PoorCondition") == 0); }
+
+                // Nếu không phải Animat và không chính xác bằng ModeName -> Cập nhật Name
+                if (!containsPrefix && !exactMode && !matchedNumeric) {
+                    strncpy(outInfo.name, seg, 31);
+                    outInfo.name[31] = '\0';
+                }
             }
         }
 
