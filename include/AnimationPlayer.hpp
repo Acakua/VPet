@@ -159,29 +159,27 @@ namespace VPet {
         uint16_t currentFrame;       // Index frame hiện tại
         uint32_t lastFrameTime;      // millis() lần cuối đổi frame
 
-        // === Double buffering (PSRAM) ===
-        // Hai buffer frame trên PSRAM — swap khi đổi frame
-        // Initialized/freed by start()/stop()
-        uint8_t* bufferA;           // Frame đang hiển thị
-        uint8_t* bufferB;           // Frame đang đọc (preload)
-        bool bufferSwapped;         // true = bufferB là frame hiện tại
-        bool nextFrameReady;        // true = buffer dự phòng đã đọc xong
+        // === PSRAM Animation Cache ===
+        // Toàn bộ frames sẽ được nạp vào PSRAM khi load()
+        // Mỗi frame 320x320x2 = 200KB
+        uint8_t* frameBuffers[MAX_FRAMES];
 
         // === LVGL image descriptor ===
-        // Trỏ tới buffer hiện tại, cập nhật khi swap
-        // (sẽ được gắn vào lv_img_set_src() trong PetDisplay.cpp)
-        void* lvglImgDesc;          // lv_img_dsc_t* — cast khi dùng LVGL
+        // Trỏ tới buffer hiện tại, cập nhật mỗi tick
+        void* lvglImgDesc;          // lv_img_dsc_t*
 
         AnimationPlayer()
             : frameCount(0), isLoop(false)
             , state(PlayerState::Idle)
             , currentFrame(0), lastFrameTime(0)
-            , bufferA(nullptr), bufferB(nullptr)
-            , bufferSwapped(false), nextFrameReady(false)
             , lvglImgDesc(nullptr)
         {
             basePath[0] = '\0';
+            for (int i = 0; i < MAX_FRAMES; i++) frameBuffers[i] = nullptr;
         }
+
+        // Giải phóng toàn bộ cache PSRAM
+        void releaseCache();
 
         // ====================================================================
         // load() — Mở thư mục animation, parse danh sách frame
@@ -244,13 +242,10 @@ namespace VPet {
         // Implementation sẽ ở AnimationPlayer.cpp
 
         // === Helper ===
-        // Lấy con trỏ buffer đang hiển thị
+        // Lấy con trỏ buffer đang hiển thị từ Cache
         uint8_t* currentBuffer() const {
-            return bufferSwapped ? bufferB : bufferA;
-        }
-        // Lấy con trỏ buffer đang preload
-        uint8_t* preloadBuffer() const {
-            return bufferSwapped ? bufferA : bufferB;
+            if (currentFrame < frameCount) return frameBuffers[currentFrame];
+            return nullptr;
         }
 
     private:
