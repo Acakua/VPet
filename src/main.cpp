@@ -22,6 +22,10 @@
 #include "WorkTimerDisplay.hpp"
 #include "MessageBubble.hpp"
 
+// Biến cho FPS counter
+static uint32_t frame_count = 0;
+lv_obj_t* lblFPS = nullptr;
+
 // ==========================================
 // CẤU HÌNH PINOUT DỰ KIẾN (Thay đổi nếu cần)
 // ==========================================
@@ -71,24 +75,30 @@ void my_log_cb(const char * buf) {
     Serial.printf("[LVGL] %s", buf);
 }
 
-// Flush điểm ảnh ra TFT
+// Flush điểm ảnh ra TFT dùng DMA
 void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
 
-    static uint32_t flush_count = 0;
-    if (flush_count++ % 50 == 0) {
-        VPET_LOG_I("GFX", "lv_disp_flush called, area: [%d,%d] -> [%d,%d], w:%u, h:%u", 
-                   area->x1, area->y1, area->x2, area->y2, w, h);
-    }
+    // Chờ DMA trước đó hoàn tất (đảm bảo hardware sẵn sàng)
+    tft.dmaWait();
 
     tft.startWrite();
     tft.setAddrWindow(area->x1, area->y1, w, h);
-    // Tính năng PushColors tối ưu của TFT_eSPI sẽ đẩy DMA (nếu bật DMA)
-    tft.pushColors((uint16_t *)&color_p->full, w * h, true);
+    // Lưu ý: Đã dùng #define LV_COLOR_16_SWAP 1 và TFT_BGR_ORDER
+    tft.pushImageDMA(area->x1, area->y1, w, h, (uint16_t*)color_p);
     tft.endWrite();
 
+    frame_count++;
     lv_disp_flush_ready(disp_drv);
+}
+
+// Callback cập nhật FPS mỗi giây
+static void update_fps_cb(lv_timer_t * timer) {
+    if (lblFPS) {
+        lv_label_set_text_fmt(lblFPS, "FPS: %u", frame_count * 2); // Nhân 2 vì chu kỳ 500ms
+        frame_count = 0;
+    }
 }
 
 // Đọc toạ độ cảm ứng điểm chạm I2C
@@ -204,7 +214,7 @@ void setup() {
 
     // 2. KHỞI TẠO THẺ SD (Dùng bus SPI nhanh)
     VPET_LOG_I("SYS", "Initializing SD Card on HSPI bus...");
-    if (!SD.begin(SD_CS, vpet_spi, 16000000)) {
+    if (!SD.begin(SD_CS, vpet_spi, 40000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
         VPET_LOG_I("SYS", "SD Card OK.");
@@ -212,7 +222,8 @@ void setup() {
     yield();
 
     // 4. NẠP DỮ LIỆU GAME (Scan SD khi bus còn sạch)
-    VPET_LOG_I("SYS", "Initializing GameSave...");
+
+    VPET_LOG_I("SYS", "Initialization Complete.");
     gameSave = new GameSave();
     if (!gameSave->load("/savedata.bin")) {
         gameSave->initNewGame("V-Pet");
@@ -229,17 +240,19 @@ void setup() {
     yield();
 
     // 5. KHỞI TẠO MÀN HÌNH (Dùng chung bus HSPI đã quét xong)
-    VPET_LOG_I("SYS", "Initializing TFT on HSPI...");
+    VPET_LOG_I("SYS", "Initializing TFT on HSPI with DMA...");
     tft.begin();
+    tft.initDMA(); 
+    tft.invertDisplay(false); // Sửa lỗi âm bản cho màn IPS
     tft.setRotation(1); 
-    tft.fillScreen(TFT_BLUE); 
     
-    // Cấu hình LEDC PWM cho đèn nền (GPIO 21)
+    // Cấu hình Đèn nền (GPIO 21)
     ledcSetup(0, 5000, 8); 
     ledcAttachPin(21, 0); 
-    ledcWrite(0, 180); 
+    ledcWrite(0, 255); // Độ sáng tối đa
+
+    tft.fillScreen(TFT_BLACK); 
     VPET_LOG_I("SYS", "TFT Initialized.");
-    yield();
 
     // Đảm bảo Bus SPI trả về trạng thái nhàn rỗi
     digitalWrite(TFT_CS, HIGH);
@@ -362,8 +375,15 @@ void setup() {
         }
     }
 
-    VPET_LOG_I("SYS", "--- STEP 3 COMPLETE ---");
-    VPET_MEM_DUMP("SYS");
+    // 8. TẠO FPS COUNTER (Phải đặt sau khi toàn bộ UI và LVGL đã sẵn sàng)
+    lblFPS = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_color(lblFPS, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_color(lblFPS, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(lblFPS, 150, 0);
+    lv_obj_align(lblFPS, LV_ALIGN_TOP_LEFT, 5, 5);
+    lv_timer_create(update_fps_cb, 500, NULL);
+
+    VPET_LOG_I("SYS", "Initialization Complete.");
 }
 
 void loop() {

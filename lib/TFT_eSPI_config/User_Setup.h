@@ -1,10 +1,11 @@
 #ifndef USER_SETUP_H
 #define USER_SETUP_H
 
-#warning "VPet User_Setup.h (SPI 27MHz) Loaded successfully!"
+#warning "VPet User_Setup.h (ST7796S BGR Mode) Loaded successfully!"
 
 // Màn hình MSP4031 (ST7796S)
 #define ST7796_DRIVER
+#define TFT_RGB_ORDER 0
 #define TFT_WIDTH  320
 #define TFT_HEIGHT 480
 
@@ -43,7 +44,7 @@
 
 // Enable SPI DMA
 #define USE_HSPI_PORT
-#define SPI_FREQUENCY  27000000
+#define SPI_FREQUENCY  40000000
 #define SPI_READ_FREQUENCY  20000000
 #define SPI_TOUCH_FREQUENCY  2500000
 

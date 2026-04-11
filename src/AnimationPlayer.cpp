@@ -291,6 +291,14 @@ namespace VPet {
             return false;
         }
 
+        // Fast Byte Swap: Chuyển Little Endian (SD) sang Big Endian (Display)
+        // Việc này cực kỳ quan trọng để DMA gửi đúng thứ tự màu lên SPI
+        uint16_t* p = (uint16_t*)buffer;
+        size_t count = FRAME_BYTES / 2;
+        for (size_t i = 0; i < count; i++) {
+            p[i] = (p[i] >> 8) | (p[i] << 8); // Manual swap or __builtin_bswap16
+        }
+
         return true;
     }
 
