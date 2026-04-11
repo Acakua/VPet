@@ -152,8 +152,30 @@ namespace VPet {
         void displayDefault() {
             countNormal++;
             VPET_LOG_V("FSM", "Playing default animation (CountNormal: %d)", countNormal);
-            _playAnimation(GraphType::Default, AnimatType::Single);
-            animState = AnimState::Playing_Single;
+            
+            // Tìm tên animation Default
+            const char* name = graph->findName(GraphType::Default);
+            if (!name) name = "Default";
+
+            // Thử B_Loop trước (Thở)
+            const AnimationEntry* entry = graph->findGraph(name, AnimatType::B_Loop, save->calculateMode());
+            if (entry) {
+                _playEntry(entry);
+                animState = AnimState::Playing_B_Loop;
+                forceLoop = true; // Loop thở vô hạn cho đến khi có event
+                return;
+            }
+
+            // Fallback sang Single
+            entry = graph->findGraph(name, AnimatType::Single, save->calculateMode());
+            if (entry) {
+                _playEntry(entry);
+                animState = AnimState::Playing_Single;
+                forceLoop = false;
+                return;
+            }
+            
+            VPET_LOG_W("FSM", "Failed to find any Default animation (B_Loop or Single) for: %s", name);
         }
 
         void displayTouchHead() {
@@ -212,7 +234,8 @@ namespace VPet {
         bool displayIdel() {
             const char* name = graph->findName(GraphType::Idel);
             if (!name) {
-                VPET_LOG_W("FSM", "No Idle animation found in dictionary!");
+                VPET_LOG_V("FSM", "Idle animation not found, falling back to normal.");
+                displayToNormal();
                 return false;
             }
 
@@ -244,6 +267,7 @@ namespace VPet {
             }
 
             VPET_LOG_W("FSM", "Failed to find suitable entry for Idle animation: %s", name);
+            displayToNormal();
             return false;
         }
 

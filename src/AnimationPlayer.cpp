@@ -277,7 +277,7 @@ namespace VPet {
         size_t bytesRead = 0;
         size_t totalRead = 0;
         while (totalRead < FRAME_BYTES) {
-            size_t toRead = (FRAME_BYTES - totalRead > 4096) ? 4096 : (FRAME_BYTES - totalRead);
+            size_t toRead = (FRAME_BYTES - totalRead > 16384) ? 16384 : (FRAME_BYTES - totalRead);
             bytesRead = f.read(buffer + totalRead, toRead);
             if (bytesRead == 0) break;
             totalRead += bytesRead;

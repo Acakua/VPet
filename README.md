@@ -29,17 +29,17 @@ For **ESP32-S3 DevKitC-1 (N16R8)** and **ST7796S** display with integrated SD sl
 | :--- | :--- | :--- | :--- |
 | **Nguồn** | **VCC** | **5V / VBUS** | Ưu tiên nguồn 5V rời |
 | | **GND** | **GND** | Phải nối chung GND |
-| **SPI (Chung)** | **SCK** | **7** | |
-| | **SDI (MOSI)** | **6** | |
-| | **SDO (MISO)** | **5** | |
+| **SPI (Chung)** | **SCK** | **7** | Chia sẻ bus HSPI |
+| | **SDI (MOSI)** | **6** | Chia sẻ bus HSPI |
+| | **SDO (MISO)** | **5** | Chia sẻ bus HSPI |
 | **Display** | **LCD_CS** | **15** | |
-| | **LCD_RS** | **4** | (RS tương đương với DC) |
-| | **LCD_RST** | **2** | Chân mới (Tránh nhiễu TX0) |
-| **LED** | **21** | Đèn nền (An toàn cho OPI) |
+| | **LCD_RS** | **4** | Lựa chọn an toàn |
+| | **LCD_RST** | **2** | Lựa chọn an toàn |
+| **LED** | | **21** | Đèn nền (Backlight) |
 | **Thẻ nhớ** | **SD_CS** | **14** | |
-| **Cảm ứng** | **CTP_SDA** | **17** | |
-| | **CTP_SCL** | **18** | |
-| | **CTP_RST** | **10** | Reset cảm ứng (GPIO rời) |
+| **Cảm ứng** | **CTP_SDA** | **1** | SDA (Tránh PSRAM/HSPI) |
+| | **CTP_SCL** | **9** | SCL (Tránh PSRAM/HSPI) |
+| | **CTP_RST** | **10** | Reset cảm ứng |
 
 > [!CAUTION]
 > DO NOT use GPIOs 33-37 and **47-48** for peripherals on the **N16R8 (OPI PSRAM)** variant, as they are reserved for the high-speed PSRAM interface and differential clock.

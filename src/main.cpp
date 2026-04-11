@@ -1,6 +1,13 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
+
+// Cấu hình Cảm ứng FT6336U (Chuẩn cuối cho N16R8)
+#define I2C_ADDR_FT6336U 0x38
+#define TOUCH_SDA 1
+#define TOUCH_SCL 9
+#define TOUCH_RST 10
+
 #include <SD.h>       // Cần cắm SD trước khi boot
 #include <TFT_eSPI.h> // Màn hình ST7796
 #include <lvgl.h>
@@ -18,27 +25,22 @@
 // ==========================================
 // CẤU HÌNH PINOUT DỰ KIẾN (Thay đổi nếu cần)
 // ==========================================
-// I2C Touch (FT6336U)
-#define TOUCH_SDA 17
-#define TOUCH_SCL 18
-#define I2C_ADDR_FT6336U 0x38
-
 // SD Card (SPI Interface - Chung với TFT trên HSPI)
 #define SD_CS   14
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_SCK  7
-#define TFT_RST_PIN 2 
-#define TOUCH_RST   10 
+#define TFT_RST_PIN 2
+#define TOUCH_RST   10
 
 // Khởi tạo đối tượng vpet_spi riêng cho Flash/SD/TFT 
 // Sử dụng bộ HSPI (SPI3_HOST) để tách biệt với bus nội bộ
 SPIClass vpet_spi(HSPI);
 TFT_eSPI tft = TFT_eSPI(); 
 
-// Kích thước chuẩn từ User_Setup.h
-static const uint16_t screenWidth  = TFT_WIDTH;
-static const uint16_t screenHeight = TFT_HEIGHT;
+// Kích thước chuẩn sau khi xoay ngang (Landscape)
+static const uint16_t screenWidth  = 480;
+static const uint16_t screenHeight = 320;
 
 // Buffers chuyển Frame cho LVGL
 static lv_disp_draw_buf_t draw_buf;
@@ -91,14 +93,15 @@ void my_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *c
 
 // Đọc toạ độ cảm ứng điểm chạm I2C
 void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
-    // TẠM THỜI TẮT: I2C Touch chưa được khởi tạo
-    data->state = LV_INDEV_STATE_REL;
-    return;
-
-    /* --- Code gốc (sẽ bật lại khi I2C Touch hoạt động) ---
     Wire.beginTransmission(I2C_ADDR_FT6336U);
     Wire.write(0x02); // TD_STATUS Register
-    if (Wire.endTransmission() != 0) {
+    uint8_t err = Wire.endTransmission();
+    if (err != 0) {
+        static uint32_t lastErr = 0;
+        if (millis() - lastErr > 5000) {
+            VPET_LOG_W("TOUCH", "I2C Communication Error: %d (Check wires!)", err);
+            lastErr = millis();
+        }
         data->state = LV_INDEV_STATE_REL;
         return;
     }
@@ -112,24 +115,40 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
         uint8_t p1_yl = Wire.read();
 
         // Xử lý touchpoint 1
+        touches = touches & 0x0F;
         if (touches > 0 && touches <= 2) {
             uint16_t x = ((p1_xh & 0x0F) << 8) | p1_xl;
             uint16_t y = ((p1_yh & 0x0F) << 8) | p1_yl;
 
+            // Lọc dữ liệu lỗi/ngoài màn hình
+            if (x >= screenWidth || y >= screenHeight) {
+                data->state = LV_INDEV_STATE_REL;
+                return;
+            }
+
             data->state = LV_INDEV_STATE_PR;
             data->point.x = x;
             data->point.y = y;
+            
+            // Dispatch tới AnimationStateMachine
+            if (animFSM) {
+                if (x < 320) { // Vùng Pet
+                    if (y < 160) {
+                        animFSM->displayTouchHead();
+                        if (gameLoop) gameLoop->interact();
+                    } else {
+                        animFSM->displayTouchBody();
+                        if (gameLoop) gameLoop->interact();
+                    }
+                }
+            }
             VPET_LOG_V("TOUCH", "Pressed at X:%u, Y:%u", x, y);
         } else {
-            if (data->state == LV_INDEV_STATE_PR) {
-                VPET_LOG_V("TOUCH", "Released");
-            }
             data->state = LV_INDEV_STATE_REL;
         }
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
-    */
 }
 
 // RTOS Timer cấp heartbeat (Time Base) cho LVGL
@@ -171,11 +190,21 @@ void setup() {
 
     // 2. Khởi tạo Bus HSPI (Dùng chung cho SD và TFT)
     vpet_spi.begin(SD_SCK, SD_MISO, SD_MOSI);
+    delay(100);
     yield();
 
-    // 3. KHỞI TẠO SD CARD (Dùng bus HSPI)
+    // 1. KHỞI TẠO CẢM ỨNG (I2C)
+    pinMode(TOUCH_RST, OUTPUT);
+    digitalWrite(TOUCH_RST, LOW);  delay(20);
+    digitalWrite(TOUCH_RST, HIGH); delay(100);
+
+    Wire.begin(TOUCH_SDA, TOUCH_SCL);
+    Wire.setClock(100000); // Standard Mode để ổn định hơn
+    VPET_LOG_I("SYS", "I2C Touch initialized (SDA=%d, SCL=%d, RST=%d)", TOUCH_SDA, TOUCH_SCL, TOUCH_RST);
+
+    // 2. KHỞI TẠO THẺ SD (Dùng bus SPI nhanh)
     VPET_LOG_I("SYS", "Initializing SD Card on HSPI bus...");
-    if (!SD.begin(SD_CS, vpet_spi, 4000000)) {
+    if (!SD.begin(SD_CS, vpet_spi, 16000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
         VPET_LOG_I("SYS", "SD Card OK.");
@@ -202,7 +231,7 @@ void setup() {
     // 5. KHỞI TẠO MÀN HÌNH (Dùng chung bus HSPI đã quét xong)
     VPET_LOG_I("SYS", "Initializing TFT on HSPI...");
     tft.begin();
-    tft.setRotation(2); 
+    tft.setRotation(1); 
     tft.fillScreen(TFT_BLUE); 
     
     // Cấu hình LEDC PWM cho đèn nền (GPIO 21)
@@ -277,12 +306,12 @@ void setup() {
 
         // 1. Tạo lv_img widget cho Pet (320x320 pixel, bên trái màn hình)
         pet_img_obj = lv_img_create(lv_scr_act());
-        lv_obj_set_pos(pet_img_obj, 0, 80);   // Y=80 để tránh đè StatusBar tương lai
+        lv_obj_set_pos(pet_img_obj, 0, 0);
         lv_obj_set_size(pet_img_obj, 320, 320);
 
         // Cấu hình lv_img_dsc trỏ vào PSRAM buffer (sẽ swap mỗi frame)
         pet_img_dsc.header.always_zero = 0;
-        pet_img_dsc.header.cf     = LV_IMG_CF_TRUE_COLOR;
+        pet_img_dsc.header.cf     = LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED;
         pet_img_dsc.header.w      = 320;
         pet_img_dsc.header.h      = 320;
         pet_img_dsc.data_size     = 320 * 320 * 2;
@@ -292,26 +321,44 @@ void setup() {
         animPlayer = new AnimationPlayer();
         animPlayer->lvglImgDesc = &pet_img_dsc;
 
-        // 3. Tìm animation Default đầu tiên từ GraphCore
+        // ===================================
+        // PHASE 2: Wiring AnimationStateMachine
+        // ===================================
+        
+        // 2b. Tạo AnimationStateMachine
+        animFSM = new AnimationStateMachine();
+        animFSM->graph  = graphCore;
+        animFSM->save   = gameSave;
+        animFSM->player = animPlayer;
+
+        // 3. Khởi động animation mặc định qua FSM
         if (graphCore && graphCore->entryCount > 0) {
-            const char* defaultName = graphCore->findName(GraphType::Default);
-            if (!defaultName) defaultName = "Default";
-            ModeType mode = gameSave ? gameSave->calculateMode() : ModeType::Normal;
-            const AnimationEntry* entry = graphCore->findGraph(defaultName, AnimatType::B_Loop, mode);
-            if (entry) {
-                VPET_LOG_I("SYS", "Starting default animation: %s", entry->path);
-                animPlayer->load(entry->path);
-                animPlayer->start(true);  // isLoop = true (B_Loop)
-                
-                // Hiển thị frame đầu tiên ngay lập tức
-                if (animPlayer->currentBuffer()) {
-                    pet_img_dsc.data = animPlayer->currentBuffer();
-                    lv_img_set_src(pet_img_obj, &pet_img_dsc);
-                    lv_obj_move_foreground(pet_img_obj);
-                }
-            } else {
-                VPET_LOG_W("SYS", "Default animation not found!");
-            }
+            animFSM->displayDefault();
+            VPET_LOG_I("SYS", "AnimationStateMachine started.");
+        }
+
+        // ===================================
+        // PHASE 3: Wiring StatusBar
+        // ===================================
+        
+        // 4. Tạo và hiển thị thanh trạng thái
+        if (pet_img_obj) {
+            statusBar = new StatusBar(lv_scr_act(), pet_img_obj);
+            statusBar->show();
+            // Trong Landscape, Pet (0,0) và Sidebar (320,0) tự khớp nhau
+            VPET_LOG_I("SYS", "StatusBar initialized in Landscape mode.");
+        }
+
+        // ===================================
+        // PHASE 4: Wiring GameLoop
+        // ===================================
+
+        // 5. Khởi tạo vòng lặp sinh tồn
+        if (gameSave && animFSM) {
+            gameLoop = new GameLoop(gameSave, animFSM);
+            gameLoop->eventIntervalMs = 2000; // Debug: 2 giây một nhịp (Gốc 15s)
+            gameLoop->start();
+            VPET_LOG_I("SYS", "GameLoop started in DEBUG MODE (2s interval).");
         }
     }
 
@@ -322,21 +369,25 @@ void setup() {
 void loop() {
     lv_timer_handler();
     
-    // Phase 1: AnimationPlayer tick
-    if (animPlayer && animPlayer->tick()) {
-        // Frame mới sẵn sàng → cập nhật LVGL
-        if (animPlayer->currentBuffer()) {
+    // Phase 2: AnimationStateMachine tick
+    if (animFSM && animFSM->tick()) {
+        // ... frame update logic ...
+        if (animPlayer && animPlayer->currentBuffer()) {
             pet_img_dsc.data = animPlayer->currentBuffer();
             lv_img_set_src(pet_img_obj, &pet_img_dsc);
             lv_obj_invalidate(pet_img_obj);
-            // Ghi đè label để thấy rõ background không bị che khuất
             lv_obj_move_foreground(pet_img_obj);
         }
     }
 
+    // Phase 4: GameLoop tick ( survival check every 15s )
+    if (gameLoop) {
+        gameLoop->tick();
+    }
+
     static uint32_t lastUpdate = 0;
     if (statusBar && gameSave && millis() - lastUpdate > 1000) {
-        // statusBar->update(gameSave);
+        statusBar->update(gameSave);
         lastUpdate = millis();
     }
     

@@ -94,15 +94,16 @@ namespace VPet {
         collapsed = !collapsed;
         
         if (collapsed) {
-            lv_obj_set_x(container, 160); // Trượt sang phải để ẩn
-            lv_obj_align_to(btnToggle, container, LV_ALIGN_OUT_LEFT_TOP, -160, 10);
+            lv_obj_set_x(container, 480); // Trượt khỏi lề phải màn hình (480px)
+            lv_obj_align_to(btnToggle, container, LV_ALIGN_OUT_LEFT_TOP, -480, 10);
             lv_label_set_text(lv_obj_get_child(btnToggle, 0), LV_SYMBOL_LEFT);
-            if (petImage) lv_obj_set_x(petImage, 80); // Căn giữa
+            if (petImage) lv_obj_set_x(petImage, 80); // Căn giữa trên màn hình 480px
         } else {
-            lv_obj_set_x(container, 0); // Trở về vị trí cũ
-            lv_obj_align_to(btnToggle, container, LV_ALIGN_OUT_LEFT_TOP, 0, 10);
+            lv_obj_set_x(container, 320); // Hiện Sidebar sát lề phải (từ x=320 đến 479)
+            // Căn nút bấm trượt theo container
+            lv_obj_set_pos(btnToggle, 320-30, 10); 
             lv_label_set_text(lv_obj_get_child(btnToggle, 0), LV_SYMBOL_RIGHT);
-            if (petImage) lv_obj_set_x(petImage, 0); // Sát lề trái
+            if (petImage) lv_obj_set_x(petImage, 0); // Sát trái nhường chỗ cho sidebar
         }
     }
 

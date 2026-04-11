@@ -50,12 +50,11 @@ namespace VPet {
     }
 
     // ================================================================
-    // eventTimerElapsed() — Xử lý mỗi 15s
-    // Port từ MainLogic.cs::EventTimer_Elapsed() dòng 470-533
+    // eventTimerElapsed() — Xử lý mỗi nhịp thở (Debug: Tăng tốc tiêu thụ)
     // ================================================================
     void GameLoop::eventTimerElapsed() {
-        // Tính toán sinh tồn (timePass = 0.05 như C# gốc)
-        functionSpend(0.05);
+        // Debug: Tăng timePass từ 0.05 lên 0.5 để thấy chỉ số tụt nhanh
+        functionSpend(0.5);
 
         // Kiểm tra IsIdel: (Default hoặc Work) và không đang click
         bool isIdle = (anim->currentGraphType == GraphType::Default || 
