@@ -69,7 +69,14 @@ For **ESP32-S3 DevKitC-1 (N16R8)** and **ST7796S** display with integrated SD sl
 
 Refer to [docs/Porting-Map.md](./docs/Porting-Map.md) for a detailed breakdown of already-ported components and upcoming milestones.
 
----
+## 🐛 Bug & Fix Tracking
 
-**Original Project**: [VPet-Simulator](https://github.com/LorisYounger/VPet) by LorisYounger.
+| Bug | Symptom | Status | Root Cause & Resolution |
+| :--- | :--- | :--- | :--- |
+| **SPI Bus Contention** | `Card Failed! cmd: 0x11` after TFT init. | **Fixed** | **Root Cause**: Conflict between default SPI (SPI2) and HSPI (SPI3) on pins 5,6,7. **Fix**: Synchronized all peripherals to `vpet_spi` (HSPI bus). |
+| **Guru Meditation** | `StoreProhibited` crash on boot. | **Fixed** | **Fix**: Use `espressif32@6.6.0` and maintain `#define USE_HSPI_PORT` in `User_Setup.h`. |
+| **Startup Delay** | 45s wait during SD scan. | **Fixed** | **Fix**: Disabled recursive `VPET_LOG_I` calls to eliminate Serial bottleneck. |
+
+---
+**Original Project**: [VPet-Simulator](https://github.com/LorisYounger/VPet) by LorisYounger.  
 **Ported by**: DeepMind Advanced Agentic Coding Team & Contributors.

@@ -104,9 +104,11 @@ namespace VPet {
     struct FrameInfo {
         uint16_t duration;      // 帧时间(ms) — Thời gian hiển thị
         uint16_t fileIndex;     // 文件索引 — Index file trên SD
+        bool hasDurationSuffix; // Có hậu tố _duration trong tên file không?
 
-        FrameInfo() : duration(100), fileIndex(0) {}
-        FrameInfo(uint16_t dur, uint16_t idx) : duration(dur), fileIndex(idx) {}
+        FrameInfo() : duration(100), fileIndex(0), hasDurationSuffix(false) {}
+        FrameInfo(uint16_t dur, uint16_t idx, bool hasSuffix = false) 
+            : duration(dur), fileIndex(idx), hasDurationSuffix(hasSuffix) {}
     };
 
     // ========================================================================
@@ -257,7 +259,8 @@ namespace VPet {
         // Parse tên file để lấy index và duration
         static void _parseFrameFilename(const char* filename,
                                          uint16_t* outIndex,
-                                         uint16_t* outDuration);
+                                         uint16_t* outDuration,
+                                         bool* outHasSuffix = nullptr);
     };
 
 } // namespace VPet

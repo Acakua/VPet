@@ -28,6 +28,7 @@ namespace VPet {
         if (!path) return 0;
 
         VPET_LOG_I("GFX", "Loading animation folder: %s", path);
+        VPET_MEM_DUMP("GFX");
         VPET_TIME_START(LoadAnimFolder);
 
         strncpy(basePath, path, sizeof(basePath) - 1);
@@ -45,6 +46,7 @@ namespace VPet {
         struct TempFrame {
             uint16_t index;
             uint16_t duration;
+            bool hasSuffix;
         } tempFrames[MAX_FRAMES];
         uint16_t tempCount = 0;
 
@@ -55,9 +57,11 @@ namespace VPet {
                 size_t len = strlen(name);
                 if (len > 4 && strcmp(name + len - 4, ".bin") == 0) {
                     uint16_t idx = 0, dur = 100;
-                    _parseFrameFilename(name, &idx, &dur);
+                    bool hasSuffix = false;
+                    _parseFrameFilename(name, &idx, &dur, &hasSuffix);
                     tempFrames[tempCount].index = idx;
                     tempFrames[tempCount].duration = dur;
+                    tempFrames[tempCount].hasSuffix = hasSuffix;
                     tempCount++;
                 }
             }
@@ -84,7 +88,7 @@ namespace VPet {
 
         // Chuyển vào frames[]
         for (uint16_t i = 0; i < tempCount; i++) {
-            frames[i] = FrameInfo(tempFrames[i].duration, tempFrames[i].index);
+            frames[i] = FrameInfo(tempFrames[i].duration, tempFrames[i].index, tempFrames[i].hasSuffix);
         }
         frameCount = tempCount;
 
@@ -251,14 +255,23 @@ namespace VPet {
         if (!buffer || frameIdx >= frameCount) return false;
 
         char filePath[160];
-        snprintf(filePath, sizeof(filePath), "%s/%03u.bin", basePath, frames[frameIdx].fileIndex);
+        if (frames[frameIdx].hasDurationSuffix) {
+            snprintf(filePath, sizeof(filePath), "%s/%03u_%u.bin", basePath, frames[frameIdx].fileIndex, frames[frameIdx].duration);
+        } else {
+            snprintf(filePath, sizeof(filePath), "%s/%03u.bin", basePath, frames[frameIdx].fileIndex);
+        }
 
+        VPET_LOG_V("SD", "Opening frame file: %s", filePath);
         VPET_TIME_START(SDRead);
         
+        digitalWrite(15, HIGH); // Ép TFT_CS=15 lên cao (Disable) để nhả bus SPI
         File f = SD.open(filePath, FILE_READ);
         if (!f) {
             VPET_LOG_E("SD", "Failed to open frame file: %s", filePath);
-            return false;
+            // Thử thêm một lần nữa cho chắc (retry)
+            delay(5);
+            f = SD.open(filePath, FILE_READ);
+            if (!f) return false;
         }
 
         size_t bytesRead = 0;
@@ -293,10 +306,12 @@ namespace VPet {
     // ====================================================================
     void AnimationPlayer::_parseFrameFilename(const char* filename,
                                                uint16_t* outIndex,
-                                               uint16_t* outDuration) {
+                                               uint16_t* outDuration,
+                                               bool* outHasSuffix) {
         // Default values
         *outIndex = 0;
         *outDuration = 100;
+        if (outHasSuffix) *outHasSuffix = false;
 
         if (!filename) return;
 
@@ -315,6 +330,7 @@ namespace VPet {
         if (underscore) {
             // Phần sau '_' là duration
             *outDuration = (uint16_t)atoi(underscore + 1);
+            if (outHasSuffix) *outHasSuffix = true;
             *underscore = '\0';
             // Phần trước '_' là index
             *outIndex = (uint16_t)atoi(name);

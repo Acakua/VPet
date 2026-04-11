@@ -23,15 +23,17 @@
 #define TOUCH_SCL 18
 #define I2C_ADDR_FT6336U 0x38
 
-// SD Card (SPI Interface - Chung với TFT)
+// SD Card (SPI Interface - Chung với TFT trên HSPI)
 #define SD_CS   14
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_SCK  7
-#define TFT_RST_PIN 2 // Moved from GPIO 1 (TX0) to GPIO 2 to avoid Serial noise
-#define TOUCH_RST   10 // Reset pin for CTP (Remapped to avoid conflict with TFT_RST)
+#define TFT_RST_PIN 2 
+#define TOUCH_RST   10 
 
-// Khởi tạo các Hardware Object
+// Khởi tạo đối tượng vpet_spi riêng cho Flash/SD/TFT 
+// Sử dụng bộ HSPI (SPI3_HOST) để tách biệt với bus nội bộ
+SPIClass vpet_spi(HSPI);
 TFT_eSPI tft = TFT_eSPI(); 
 
 // Kích thước chuẩn từ User_Setup.h
@@ -141,37 +143,49 @@ void lv_tick_task(void *arg) {
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
-    delay(2000); 
+    // Chờ Serial Monitor kết nối (tối đa 5s) để không bỏ lỡ log khởi động
+    while (!Serial && millis() < 5000) {
+        delay(10);
+    }
+    Serial.flush();
+    delay(500); 
+    Serial.println("\n\n###########################################");
+    Serial.println("##    VPET-ESP32S3 STARTUP SEQUENCE     ##");
+    Serial.println("###########################################\n");
 
     VPET_LOG_I("SYS", "--- VPet ESP32 Boot Sequence Initiated ---");
     VPET_MEM_DUMP("SYS");
 
-    // 1. Manual Reset cho màn hình (GPIO 2) để đảm bảo controller tỉnh dậy sạch sẽ
-    // Không dùng GPIO 1 vì trùng Serial TX, gây nhiễu log.
+    // 1. Manual Reset cho màn hình (GPIO 2)
     pinMode(TFT_RST_PIN, OUTPUT);
     digitalWrite(TFT_RST_PIN, LOW);
     delay(100);
     digitalWrite(TFT_RST_PIN, HIGH);
     delay(200);
 
-    // 2. Khởi tạo Bus SPI (Chung cho SD và TFT)
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
+    // 1b. Khóa chân CS để tránh bus bị thả nổi
+    pinMode(SD_CS, OUTPUT);
+    pinMode(TFT_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+    digitalWrite(TFT_CS, HIGH);
+
+    // 2. Khởi tạo Bus HSPI (Dùng chung cho SD và TFT)
+    vpet_spi.begin(SD_SCK, SD_MISO, SD_MOSI);
     yield();
 
-    // 3. KHỞI TẠO SD CARD 
-    VPET_LOG_I("SYS", "Initializing SD Card...");
-    if (!SD.begin(SD_CS, SPI, 4000000)) {
+    // 3. KHỞI TẠO SD CARD (Dùng bus HSPI)
+    VPET_LOG_I("SYS", "Initializing SD Card on HSPI bus...");
+    if (!SD.begin(SD_CS, vpet_spi, 4000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
-        VPET_LOG_I("SYS", "SD Card Ready.");
+        VPET_LOG_I("SYS", "SD Card OK.");
     }
     yield();
 
-    // 4. NẠP DỮ LIỆU GAME & ĐỒ HỌA (Ưu tiên nạp trước khi bật màn hình để tránh noise SPI)
+    // 4. NẠP DỮ LIỆU GAME (Scan SD khi bus còn sạch)
     VPET_LOG_I("SYS", "Initializing GameSave...");
     gameSave = new GameSave();
     if (!gameSave->load("/savedata.bin")) {
-        VPET_LOG_W("SYS", "No save file found, creating a new pet...");
         gameSave->initNewGame("V-Pet");
     }
     yield();
@@ -185,39 +199,32 @@ void setup() {
     }
     yield();
 
-    // 4c. PHỤC HỒI SPI BUS SAU SD SCAN NẶNG
-    // Recursive scan mở/đóng hàng trăm file handles, gây lỗi SD card
-    // (no token received, Card Failed) → SPI bus ở trạng thái không xác định.
-    // Phải reset SPI trước khi TFT init, nếu không tft.begin() sẽ crash
-    // với StoreProhibited tại EXCVADDR=0x10 (null SPI peripheral pointer).
-    VPET_LOG_I("SYS", "Recovering SPI bus after SD scan...");
-    digitalWrite(SD_CS, HIGH);   // Đảm bảo SD CS deasserted
-    SPI.end();                   // Giải phóng SPI peripheral
-    delay(50);                   // Cho bus ổn định
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // Re-init SPI với đúng pinout
-    delay(50);
-    VPET_LOG_I("SYS", "SPI bus recovered.");
+    // 5. KHỞI TẠO MÀN HÌNH (Dùng chung bus HSPI đã quét xong)
+    VPET_LOG_I("SYS", "Initializing TFT on HSPI...");
+    tft.begin();
+    tft.setRotation(2); 
+    tft.fillScreen(TFT_BLUE); 
+    
+    // Cấu hình LEDC PWM cho đèn nền (GPIO 21)
+    ledcSetup(0, 5000, 8); 
+    ledcAttachPin(21, 0); 
+    ledcWrite(0, 180); 
+    VPET_LOG_I("SYS", "TFT Initialized.");
     yield();
 
-    // 5. KHỞI TẠO MÀN HÌNH (Bật sau khi đã xong các tác vụ SPI nặng)
-    VPET_LOG_I("SYS", "Initializing TFT...");
-    tft.begin();
-    tft.setRotation(0); 
-    tft.fillScreen(TFT_BLUE); // Đổi sang màu Xanh để nhận biết màn hình đã khởi tạo thành công
-    
-    // Cấu hình LEDC PWM cho đèn nền (GPIO 21) - Tương thích Core 2.0 (Platform 6.6.0)
-    ledcSetup(0, 5000, 8);  // Channel 0, 5kHz, 8-bit resolution
-    ledcAttachPin(21, 0);   // Attach GPIO 21 to Channel 0
-    ledcWrite(0, 255);      // Đẩy tối đa 100% độ sáng
-    VPET_LOG_I("SYS", "TFT Initialized (TFT_eSPI).");
+    // Đảm bảo Bus SPI trả về trạng thái nhàn rỗi
+    digitalWrite(TFT_CS, HIGH);
+    digitalWrite(SD_CS, HIGH);
+    yield();
 
-    // 6. KHỞI TẠO LVGL
+    ledcWrite(0, 255);      
+    VPET_LOG_I("SYS", "STEP 2 COMPLETE: Hardware Ready.");
+
     VPET_LOG_I("SYS", "Initializing LVGL...");
     lv_init();
     lv_log_register_print_cb(my_log_cb);
 
     VPET_LOG_I("SYS", "Allocating Framebuffers in Internal RAM...");
-    // Sử dụng Double Buffer nhẹ trên Internal RAM
     uint32_t bufSize = screenWidth * 20;
     buf1 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     buf2 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -233,14 +240,12 @@ void setup() {
         disp_drv.draw_buf = &draw_buf;
         lv_disp_drv_register(&disp_drv);
 
-        // Kích hoạt Touch System Input (Tạm thời REL để debug screen)
         static lv_indev_drv_t indev_drv;
         lv_indev_drv_init(&indev_drv);
         indev_drv.type = LV_INDEV_TYPE_POINTER;
         indev_drv.read_cb = my_touchpad_read;
         lv_indev_drv_register(&indev_drv);
 
-        // Timer cho LVGL (RTOS Timer)
         const esp_timer_create_args_t periodic_timer_args = {
             .callback = &lv_tick_task,
             .arg = NULL,
@@ -251,7 +256,6 @@ void setup() {
         esp_timer_create(&periodic_timer_args, &periodic_timer);
         esp_timer_start_periodic(periodic_timer, 5000);
 
-        // Giao diện Minimal UI để xác nhận màn hình hoạt động
         lv_obj_t* scr = lv_scr_act();
         lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), LV_PART_MAIN);
         
@@ -260,13 +264,12 @@ void setup() {
             lv_label_set_text_fmt(label, "VPet ESP32\nDisplay OK!\nPet: %s\nAnims: %u", 
                                gameSave->name, graphCore->entryCount);
         } else {
-            lv_label_set_text(label, "VPet ESP32\nSD Ready\nData Load Fail!");
+            uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+            lv_label_set_text_fmt(label, "VPet ESP32\nSD: %llu MB\nData Load Fail!", cardSize);
         }
         lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-        // StatusBar (Tạm ẩn)
-        // statusBar = new StatusBar(scr, nullptr);
 
         // ===================================
         // PHASE 1: Wiring AnimationPlayer
@@ -299,6 +302,13 @@ void setup() {
                 VPET_LOG_I("SYS", "Starting default animation: %s", entry->path);
                 animPlayer->load(entry->path);
                 animPlayer->start(true);  // isLoop = true (B_Loop)
+                
+                // Hiển thị frame đầu tiên ngay lập tức
+                if (animPlayer->currentBuffer()) {
+                    pet_img_dsc.data = animPlayer->currentBuffer();
+                    lv_img_set_src(pet_img_obj, &pet_img_dsc);
+                    lv_obj_move_foreground(pet_img_obj);
+                }
             } else {
                 VPET_LOG_W("SYS", "Default animation not found!");
             }

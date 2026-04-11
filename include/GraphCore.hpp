@@ -243,8 +243,8 @@ namespace VPet {
             GraphInfo info;
             _parseGraphInfo(fullPath, info);
 
-            VPET_LOG_I("SD", "    Registered: [%s] -> Type:%u Name:%s Mode:%u Animat:%u Frames:%u", 
-                       fullPath, (uint8_t)info.type, info.name, (uint8_t)info.modeType, (uint8_t)info.animat, frames);
+            // VPET_LOG_I("SD", "    Registered: [%s] -> Type:%u Name:%s Mode:%u Animat:%u Frames:%u", 
+            //            fullPath, (uint8_t)info.type, info.name, (uint8_t)info.modeType, (uint8_t)info.animat, frames);
             
             addGraph(AnimationEntry(fullPath, info, frames, 100)); // duration_ms sẽ đc parse lúc load frames
         }
