@@ -189,8 +189,16 @@ namespace VPet {
 
         lv_obj_add_event_cb(btnToggle, toggle_btn_cb, LV_EVENT_CLICKED, this);
 
-        // 7. Menu chọn công việc (Phải tạo SAU btnToggle để đè lên trên)
+        // 7. Menu chọn công việc
         create_work_menu(parent);
+
+        // ĐẢM BẢO THỨ TỰ LAYER:
+        // 1. Pet ở dưới cùng (đã tạo trước đó trong main.cpp)
+        // 2. Sidebar container và Nút Toggle
+        lv_obj_move_foreground(container);
+        lv_obj_move_foreground(btnToggle);
+        // 3. Menu chọn công việc ở trên cùng
+        lv_obj_move_foreground(workMenu);
 
         lv_obj_add_event_cb(btnWork, open_work_menu_cb, LV_EVENT_CLICKED, workMenu); 
         lv_obj_add_event_cb(btnStudy, open_work_menu_cb, LV_EVENT_CLICKED, workMenu);
@@ -199,6 +207,7 @@ namespace VPet {
 
         menuContainer = lv_obj_create(parent);
         lv_obj_add_flag(menuContainer, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(menuContainer);
 
         hide();
     }

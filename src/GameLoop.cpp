@@ -27,119 +27,120 @@ namespace VPet {
         lastEventTime = millis();
 
         // Khởi tạo 10 công việc mặc định (Port từ vup.lps)
-        // 1. Văn bản (Work)
-        strncpy(works[0].name, "Copywriting", 31);
-        strncpy(works[0].graph, "workone", 31);
+        // ====================================================================
+        // Khởi tạo danh sách công việc & học tập (Port từ vup.lps dự án gốc)
+        // Lưu ý: Tên graph phải khớp chính xác với thư mục trên SD Card
+        // ====================================================================
+        
+        // 0. Dọn dẹp (Work)
+        strncpy(works[0].name, "Dọn dẹp", 31);
+        strncpy(works[0].graph, "WorkClean", 31);
         works[0].type = WorkType::Work;
-        works[0].moneyBase = 8;
-        works[0].strengthFood = 3.5;
-        works[0].strengthDrink = 2.5;
+        works[0].moneyBase = 20;
+        works[0].strengthFood = 3;
+        works[0].strengthDrink = 2;
         works[0].feeling = 1;
-        works[0].timeMinutes = 60;
-        works[0].finishBonus = 0.1;
+        works[0].timeMinutes = 30;
+        works[0].levelLimit = 0;
 
-        // 2. Dọn màn hình (Work)
-        strncpy(works[1].name, "Screen Clean", 31);
-        strncpy(works[1].graph, "workclean", 31);
+        // 1. Lao động (Work)
+        strncpy(works[1].name, "Lao động", 31);
+        strncpy(works[1].graph, "WorkONE", 31);
         works[1].type = WorkType::Work;
-        works[1].moneyBase = 16;
+        works[1].moneyBase = 40;
         works[1].strengthFood = 5;
         works[1].strengthDrink = 5;
-        works[1].feeling = 2.5;
-        works[1].timeMinutes = 90;
-        works[1].levelLimit = 10;
-        works[1].finishBonus = 0.2;
+        works[1].feeling = -2;
+        works[1].timeMinutes = 60;
+        works[1].levelLimit = 0;
 
-        // 3. Livestream (Work)
-        strncpy(works[2].name, "Live Stream", 31);
-        strncpy(works[2].graph, "worktwo", 31);
+        // 2. Lập trình (Work)
+        strncpy(works[2].name, "Lập trình", 31);
+        strncpy(works[2].graph, "WorkTWO", 31);
         works[2].type = WorkType::Work;
-        works[2].moneyBase = 28;
-        works[2].strengthFood = 5;
+        works[2].moneyBase = 100;
+        works[2].strengthFood = 8;
         works[2].strengthDrink = 10;
-        works[2].feeling = 4;
-        works[2].timeMinutes = 180;
-        works[2].levelLimit = 20;
-        works[2].finishBonus = 0.25;
+        works[2].feeling = -5;
+        works[2].timeMinutes = 120;
+        works[2].levelLimit = 0;
 
-        // 4. Học tập (Study)
-        strncpy(works[3].name, "Learning", 31);
-        strncpy(works[3].graph, "study", 31);
+        // 3. Tự học (Study)
+        strncpy(works[3].name, "Tự học", 31);
+        strncpy(works[3].graph, "Study", 31);
         works[3].type = WorkType::Study;
-        works[3].moneyBase = 80;
+        works[3].moneyBase = 0;
         works[3].strengthFood = 2;
         works[3].strengthDrink = 2;
-        works[3].feeling = 3;
+        works[3].feeling = 2;
         works[3].timeMinutes = 45;
-        works[3].finishBonus = 0.2;
+        works[3].levelLimit = 0;
 
-        // 5. Nghiên cứu (Study)
-        strncpy(works[4].name, "Research", 31);
-        strncpy(works[4].graph, "studytwo", 31);
+        // 4. Nghiên cứu (Study)
+        strncpy(works[4].name, "Nghiên cứu", 31);
+        strncpy(works[4].graph, "StudyTWO", 31);
         works[4].type = WorkType::Study;
-        works[4].moneyBase = 120;
-        works[4].strengthFood = 2.5;
-        works[4].strengthDrink = 3.5;
+        works[4].moneyBase = 0;
+        works[4].strengthFood = 4;
+        works[4].strengthDrink = 4;
         works[4].feeling = 4;
-        works[4].timeMinutes = 75;
-        works[4].levelLimit = 15;
-        works[4].finishBonus = 0.4;
+        works[4].timeMinutes = 90;
+        works[4].levelLimit = 0;
 
-        // 6. Chơi game (Play)
-        strncpy(works[5].name, "Gaming", 31);
-        strncpy(works[5].graph, "playone", 31);
-        works[5].type = WorkType::Play;
-        works[5].moneyBase = 18;
-        works[5].strengthFood = 1;
-        works[5].strengthDrink = 1.5;
-        works[5].feeling = -1;
-        works[5].timeMinutes = 30;
-        works[5].finishBonus = 0.2;
+        // 5. Vẽ tranh (Study)
+        strncpy(works[5].name, "Vẽ tranh", 31);
+        strncpy(works[5].graph, "StudyPaint", 31);
+        works[5].type = WorkType::Study;
+        works[5].moneyBase = 0;
+        works[5].strengthFood = 3;
+        works[5].strengthDrink = 2;
+        works[5].feeling = 5;
+        works[5].timeMinutes = 60;
+        works[5].levelLimit = 0;
 
-        // 7. Sửa lỗi (Play)
-        strncpy(works[6].name, "Bug Fix", 31);
-        strncpy(works[6].graph, "removeobject", 31);
+        // 6. Chơi Game (Play)
+        strncpy(works[6].name, "Chơi Game", 31);
+        strncpy(works[6].graph, "PlayONE", 31);
         works[6].type = WorkType::Play;
-        works[6].moneyBase = 18;
-        works[6].strengthFood = 0.5;
-        works[6].strengthDrink = 0.5;
-        works[6].feeling = -0.5;
-        works[6].timeMinutes = 60;
-        works[6].levelLimit = 6;
-        works[6].finishBonus = 0.25;
+        works[6].moneyBase = 0;
+        works[6].strengthFood = 1;
+        works[6].strengthDrink = 1;
+        works[6].feeling = 10;
+        works[6].timeMinutes = 30;
+        works[6].levelLimit = 0;
 
-        // 8. Nhảy dây (Play)
-        strncpy(works[7].name, "Jump Rope", 31);
-        strncpy(works[7].graph, "ropeskipping", 31);
+        // 7. Nhảy dây (Play)
+        strncpy(works[7].name, "Nhảy dây", 31);
+        strncpy(works[7].graph, "RopeSkipping", 31);
         works[7].type = WorkType::Play;
-        works[7].moneyBase = 10;
-        works[7].strengthFood = 1;
-        works[7].strengthDrink = 1;
-        works[7].feeling = 0.5;
-        works[7].timeMinutes = 10;
-        works[7].levelLimit = 12;
-        works[7].finishBonus = 0.2;
+        works[7].moneyBase = 0;
+        works[7].strengthFood = 10;
+        works[7].strengthDrink = 10;
+        works[7].feeling = 5;
+        works[7].timeMinutes = 15;
+        works[7].levelLimit = 0;
+
+        // 8. Sửa lỗi (Play)
+        strncpy(works[8].name, "Sửa lỗi", 31);
+        strncpy(works[8].graph, "RemoveObject", 31);
+        works[8].type = WorkType::Play;
+        works[8].moneyBase = 0;
+        works[8].strengthFood = 2;
+        works[8].strengthDrink = 2;
+        works[8].feeling = 2;
+        works[8].timeMinutes = 40;
+        works[8].levelLimit = 0;
 
         // 9. Thư pháp (Study)
-        strncpy(works[8].name, "Calligraphy", 31);
-        strncpy(works[8].graph, "calligraphy", 31);
-        works[8].type = WorkType::Study;
-        works[8].strengthFood = 1;
-        works[8].strengthDrink = 1;
-        works[8].feeling = 1;
-        works[8].timeMinutes = 20;
-        works[8].levelLimit = 8;
-        works[8].finishBonus = 0.2;
-
-        // 10. Vẽ tranh (Study)
-        strncpy(works[9].name, "Painting", 31);
-        strncpy(works[9].graph, "studypaint", 31);
+        strncpy(works[9].name, "Thư pháp", 31);
+        strncpy(works[9].graph, "Calligraphy", 31);
         works[9].type = WorkType::Study;
-        works[9].strengthFood = 2.2;
-        works[9].strengthDrink = 1.2;
-        works[9].feeling = 0.8;
-        works[9].timeMinutes = 120;
-        works[9].levelLimit = 25;
+        works[9].moneyBase = 0;
+        works[9].strengthFood = 1;
+        works[9].strengthDrink = 1;
+        works[9].feeling = 3;
+        works[9].timeMinutes = 60;
+        works[9].levelLimit = 0;
         works[9].finishBonus = 0.25;
     }
 
