@@ -187,14 +187,11 @@ SD Card → [bufferA/B in PSRAM] → [lv_img widget] → SPI DMA → Màn hình
 
 - [x] `TaskControl` struct — 4 trạng thái điều khiển *(port từ IGraph.cs dòng 87-139, khớp 100%)* — 2026-04-03
 - [x] `FrameInfo` struct — duration + fileIndex mỗi frame *(port từ PNGAnimation.Animation)* — 2026-04-03
-- [x] `AnimationPlayer::load(path)` — Mở thư mục SD, parse tên file → frame info — 2026-04-03
-  - ✅ Parse `000_150.bin` → index=0, duration=150ms *(khớp C# dòng 184-186)*
-- [x] `AnimationPlayer::start(isLoop)` — Cấp phát 2 buffer PSRAM, đọc frame 0 — 2026-04-03
-- [x] `AnimationPlayer::tick()` — Non-blocking frame advance *(port logic từ Animation::Run dòng 230-268)* — 2026-04-03
-  - ✅ **Khớp C#**: Stop→EndAction | Stoped→return | StatusQuo→loop/end | Continue→reset
-- [x] `AnimationPlayer::stop()` — Giải phóng PSRAM buffer — 2026-04-03
-- [x] **Double Buffering:** bufferA (hiển thị) / bufferB (preload) trên PSRAM — 2026-04-03
-- [x] **TaskControl logic** (Stop/Continue/Loop) — port từ C# dòng 237-268 — 2026-04-03
+- [x] `AnimationPlayer::load(path)` — Mapping metadata từ thư mục SD Card — 2026-05-04
+- [x] `AnimationPlayer::start(isLoop)` — Cấp phát 2 buffer PSRAM (A/B), nạp frame 0 & preload frame 1 — 2026-05-04
+- [x] `AnimationPlayer::tick()` — Non-blocking frame swap với cơ chế Double Buffering — 2026-05-04
+- [x] `AnimationPlayer::stop()` — Dừng phát (giữ buffer để reuse) — 2026-05-04
+- [x] **Double Buffering (Streaming Engine):** Chỉ dùng 400KB PSRAM cho mọi animation — 2026-05-04
 
 ### 2D. Tệp `Graph/FoodAnimation.cs` → `src/FoodAnimation.cpp`
 Hoạt ảnh ăn uống — chuỗi 3 lớp (front/back/food image).

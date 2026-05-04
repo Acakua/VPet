@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
+#include <lvgl.h>
 #include "Utils.hpp"
 
 namespace VPet {
@@ -27,13 +28,7 @@ namespace VPet {
     uint16_t AnimationPlayer::load(const char* path) {
         if (!path) return 0;
         
-        // Luôn giải phóng cache cũ trước khi load hành động mới
-        releaseCache();
-
-        VPET_LOG_I("GFX", "Loading animation folder: %s", path);
-        VPET_MEM_DUMP("GFX");
-        VPET_TIME_START(LoadAnimFolder);
-
+        VPET_LOG_I("GFX", "Mapping animation folder: %s", path);
         strncpy(basePath, path, sizeof(basePath) - 1);
         basePath[sizeof(basePath) - 1] = '\0';
         frameCount = 0;
@@ -45,7 +40,7 @@ namespace VPet {
             return 0;
         }
 
-        // Đọc tất cả file .bin trong thư mục
+        // Đọc tất cả file .bin trong thư mục (Chỉ lấy metadata, không nạp ảnh)
         struct TempFrame {
             uint16_t index;
             uint16_t duration;
@@ -89,55 +84,57 @@ namespace VPet {
             tempFrames[j + 1] = key;
         }
 
-        // Chuyển vào frames[] và Nạp Cache vào PSRAM
-        VPET_LOG_I("GFX", "Caching %u frames into PSRAM...", tempCount);
-        uint32_t totalAllocated = 0;
-        frameCount = tempCount; // Đặt trước để _readFrame vượt qua kiểm tra index
-
+        // Lưu metadata vào mảng frames
         for (uint16_t i = 0; i < tempCount; i++) {
             frames[i] = FrameInfo(tempFrames[i].duration, tempFrames[i].index, tempFrames[i].hasSuffix);
-            
-            // Cấp phát PSRAM cho frame hiện tại
-            frameBuffers[i] = (uint8_t*)heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM);
-            if (!frameBuffers[i]) {
-                VPET_LOG_E("GFX", "PSRAM Full! Failed at frame %u. Stopping load.", i);
-                frameCount = i; // Cập nhật lại số lượng frame thực tế đã nạp thành công
-                break;
-            }
-            
-            // Đọc trực tiếp vào bộ đệm PSRAM
-            if (!_readFrame(i, frameBuffers[i])) {
-                VPET_LOG_E("GFX", "Read failed for frame %u", i);
-                heap_caps_free(frameBuffers[i]);
-                frameBuffers[i] = nullptr;
-                frameCount = i; // Cập nhật lại số lượng frame thực tế đã nạp thành công
-                break;
-            }
-            totalAllocated += FRAME_BYTES;
         }
+        frameCount = tempCount;
 
-        VPET_TIME_END(LoadAnimFolder, "GFX");
-        VPET_LOG_I("GFX", "Animation cached: %u/%u frames, %u KB used.", frameCount, tempCount, totalAllocated / 1024);
-
+        VPET_LOG_I("GFX", "Animation mapped: %u frames. PSRAM will be allocated on start().", frameCount);
         return frameCount;
     }
 
+
     bool AnimationPlayer::start(bool loop, AnimEndCallback onEnd, void* ctx) {
         if (frameCount == 0) {
-            VPET_LOG_W("GFX", "Cannot start: no frames cached.");
+            VPET_LOG_W("GFX", "Cannot start: no frames mapped.");
             return false;
         }
 
-        VPET_LOG_V("GFX", "Starting cached playback. Frames: %u", frameCount);
+        // Cấp phát buffer nếu chưa có (Reuse để tránh fragmentation)
+        if (!bufferA) bufferA = (uint8_t*)heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM);
+        if (!bufferB) bufferB = (uint8_t*)heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM);
+
+        if (!bufferA || !bufferB) {
+            VPET_LOG_E("GFX", "Failed to allocate Streaming Buffers!");
+            return false;
+        }
+
+        VPET_LOG_V("GFX", "Starting Streaming playback. Frames: %u", frameCount);
 
         isLoop = loop;
         control = TaskControl(onEnd, ctx);
         currentFrame = 0;
+        isBufferAShowing = true;
+        isNextPreloaded = false;
+
+        // Nạp frame 0 vào bufferA ngay lập tức (hiển thị trước)
+        if (!_readFrame(0, bufferA)) {
+            VPET_LOG_E("GFX", "Failed to read first frame!");
+            return false;
+        }
 
         state = PlayerState::Playing;
         lastFrameTime = millis();
+        
+        // Bắt đầu nạp preload frame 1 vào bufferB (chờ swap)
+        if (frameCount > 1) {
+            isNextPreloaded = _readFrame(1, bufferB);
+        }
+
         return true;
     }
+
 
     bool AnimationPlayer::tick() {
         if (state != PlayerState::Playing) return false;
@@ -146,46 +143,70 @@ namespace VPet {
         uint32_t now = millis();
         uint32_t elapsed = now - lastFrameTime;
 
-        if (elapsed < frames[currentFrame].duration) {
-            return false;
-        }
-
-        // Với Cache PSRAM, đổi frame là tức thời
-        switch (control.type) {
-            case TaskControl::ControlType::Stop:
+        // 1. Kiểm tra đến lúc đổi frame chưa?
+        if (elapsed >= frames[currentFrame].duration) {
+            // Kiểm tra trạng thái dừng
+            if (control.type == TaskControl::ControlType::Stop) {
                 control.invokeEndAction();
                 state = PlayerState::Idle;
                 return false;
+            }
 
-            case TaskControl::ControlType::Status_Stoped:
-                return false;
+            // Tính toán index frame tiếp theo
+            uint16_t nextFrameIdx = currentFrame + 1;
+            bool shouldStop = false;
 
-            case TaskControl::ControlType::Status_Quo:
-            case TaskControl::ControlType::Continue:
-            {
-                uint16_t nextFrame = currentFrame + 1;
-
-                if (nextFrame >= frameCount) {
-                    if (isLoop) {
-                        nextFrame = 0;
-                    } else if (control.type == TaskControl::ControlType::Continue) {
-                        control.type = TaskControl::ControlType::Status_Quo;
-                        nextFrame = 0;
-                    } else {
-                        control.type = TaskControl::ControlType::Status_Stoped;
-                        control.invokeEndAction();
-                        state = PlayerState::Idle;
-                        return false;
-                    }
+            if (nextFrameIdx >= frameCount) {
+                if (isLoop) {
+                    nextFrameIdx = 0;
+                } else if (control.type == TaskControl::ControlType::Continue) {
+                    control.type = TaskControl::ControlType::Status_Quo;
+                    nextFrameIdx = 0;
+                } else {
+                    shouldStop = true;
                 }
+            }
 
-                currentFrame = nextFrame;
+            if (shouldStop) {
+                control.type = TaskControl::ControlType::Status_Stoped;
+                control.invokeEndAction();
+                state = PlayerState::Idle;
+                return false;
+            }
+
+            // SWAP BUFFER: Chỉ swap nếu frame tiếp theo đã nạp xong vào buffer chờ
+            if (isNextPreloaded) {
+                isBufferAShowing = !isBufferAShowing;
+                currentFrame = nextFrameIdx;
                 lastFrameTime = now;
-                return true; 
+                isNextPreloaded = false; // Reset để nạp frame kế tiếp nữa
+                return true; // LVGL sẽ vẽ buffer mới
+            } else {
+                // Nếu chưa nạp kịp từ SD, đợi thêm (Lag về mặt hình ảnh nhưng không crash)
+                VPET_LOG_W("GFX", "Frame %u not preloaded in time! Display lag.", nextFrameIdx);
+                // Thử nạp lại ngay lập tức (blocking read để đồng bộ lại)
+                uint8_t* nextBuf = isBufferAShowing ? bufferB : bufferA;
+                isNextPreloaded = _readFrame(nextFrameIdx, nextBuf);
+                return false;
             }
         }
+
+        // 2. PRELOAD: Nếu đang trong thời gian hiển thị mà chưa preload frame tiếp theo, hãy nạp nó ngay
+        if (!isNextPreloaded) {
+            uint16_t nextFrameIdx = currentFrame + 1;
+            if (nextFrameIdx >= frameCount) {
+                if (isLoop || control.type == TaskControl::ControlType::Continue) nextFrameIdx = 0;
+                else return false;
+            }
+            
+            uint8_t* nextBuf = isBufferAShowing ? bufferB : bufferA;
+            VPET_LOG_V("GFX", "Preloading next frame: %u", nextFrameIdx);
+            isNextPreloaded = _readFrame(nextFrameIdx, nextBuf);
+        }
+
         return false;
     }
+
 
     void AnimationPlayer::stop(bool invokeEnd) {
         VPET_LOG_V("GFX", "Stopping player (invokeEnd: %d)", invokeEnd);
@@ -197,18 +218,19 @@ namespace VPet {
         // KHÔNG giải phóng cache ở đây, vì load() sẽ quản lý vòng đời bộ nhớ
     }
 
-    void AnimationPlayer::releaseCache() {
-        uint16_t freed = 0;
-        for (int i = 0; i < MAX_FRAMES; i++) {
-            if (frameBuffers[i]) {
-                heap_caps_free(frameBuffers[i]);
-                frameBuffers[i] = nullptr;
-                freed++;
-            }
+    void AnimationPlayer::releaseBuffers() {
+        if (bufferA) {
+            heap_caps_free(bufferA);
+            bufferA = nullptr;
         }
-        if (freed > 0) VPET_LOG_V("GFX", "Released %u buffers from PSRAM.", freed);
+        if (bufferB) {
+            heap_caps_free(bufferB);
+            bufferB = nullptr;
+        }
+        VPET_LOG_I("GFX", "Streaming buffers released.");
         frameCount = 0;
     }
+
 
     bool AnimationPlayer::_readFrame(uint16_t frameIdx, uint8_t* buffer) {
         if (!buffer || frameIdx >= frameCount) return false;
@@ -240,6 +262,10 @@ namespace VPet {
             bytesRead = f.read(buffer + totalRead, toRead);
             if (bytesRead == 0) break;
             totalRead += bytesRead;
+            
+            // CỰC KỲ QUAN TRỌNG: Gọi lv_timer_handler để xử lý touch/UI xen kẽ 
+            // tránh việc đọc SD chặn hoàn toàn phản hồi của hệ thống.
+            lv_timer_handler(); 
         }
         f.close();
 

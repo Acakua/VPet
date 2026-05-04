@@ -14,15 +14,26 @@
 namespace VPet {
 
     // ========================================================================
+    // WorkingState — Trạng thái làm việc (Port từ MainLogic.cs dòng 635)
+    // ========================================================================
+    // WorkingState đã được định nghĩa trong AnimationStateMachine.hpp
+    // enum class WorkingState { ... };
+
+    // ========================================================================
     // GameLoop — Bộ điều phối chính
     // ========================================================================
     struct GameLoop {
         GameSave* save;
         AnimationStateMachine* anim;
-        Work* currentWork;          // Công việc hiện tại đang chạy (hoàn thành sau)
+        
+        Work* nowWork;              // Công việc hiện tại (Port từ MainLogic.cs NowWork)
+        WorkingState state;         // Trạng thái hiện tại (Port từ MainLogic.cs State)
+        
+        static const int WORK_COUNT = 10;
+        Work works[WORK_COUNT];     // Danh sách 10 công việc mặc định
         
         // Timer
-        uint32_t lastInteractionTime; // Tính bằng millis() hoặc unix timestamp
+        uint32_t lastInteractionTime; // Tính bằng millis()
         uint32_t lastEventTime;       // Lần cuối chạy EventTimer
         
         // Configs
@@ -30,43 +41,50 @@ namespace VPet {
 
         GameLoop(GameSave* _save = nullptr, AnimationStateMachine* _anim = nullptr)
             : save(_save), anim(_anim)
+            , nowWork(nullptr), state(WorkingState::Normal)
             , lastInteractionTime(0), lastEventTime(0)
             , eventIntervalMs(15000)
         {
         }
 
         // ================================================================
-        // start() — Khởi động vòng lặp
+        // start() — Khởi động vòng lặp và nạp dữ liệu công việc
         // ================================================================
         void start();
 
         // ================================================================
         // tick() — Gọi mỗi vòng Arduino loop()
-        // Kiểm tra EventTimer, nếu đủ thời gian thì chạy logic
         // ================================================================
         void tick();
 
         // ================================================================
-        // interact() — Gọi khi người dùng tương tác với Pet (xoa đầu, chạm)
+        // interact() — Gọi khi người dùng tương tác với Pet
         // ================================================================
         void interact();
 
+        // ================================================================
+        // startWork(index) — Bắt đầu một công việc từ danh sách
+        // ================================================================
+        bool startWork(int index);
+
+        // ================================================================
+        // stopWork() — Dừng công việc hiện tại
+        // ================================================================
+        void stopWork();
+
     private:
         // ================================================================
-        // eventTimerElapsed() — Xử lý mỗi 15s (hoặc theo eventIntervalMs)
-        // Port từ MainLogic.cs::EventTimer_Elapsed() dòng 470-533
+        // eventTimerElapsed() — Xử lý mỗi 15s
         // ================================================================
         void eventTimerElapsed();
 
         // ================================================================
         // functionSpend(timePass) — Tính toán sinh tồn CỐT LÕI
-        // Port từ MainLogic.cs::FunctionSpend() dòng 234-426
         // ================================================================
         void functionSpend(double timePass);
 
         // ================================================================
         // playSwitchAnimat(before, after) — Phát hoạt ảnh chuyển trạng thái
-        // Port từ MainLogic.cs::PlaySwitchAnimat() dòng 432-453
         // ================================================================
         void playSwitchAnimat(ModeType before, ModeType after);
     };

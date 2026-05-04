@@ -53,7 +53,8 @@ namespace VPet {
         Normal = 0,         // 正常 — Bình thường (Default animation)
         Work,               // 工作中 — Đang làm việc
         Sleep,              // 睡觉中 — Đang ngủ
-        // Travel — Bỏ qua trên ESP32
+        Travel,             // 旅游中 — Du lịch
+        Empty               // Trạng thái trống/Khác
     };
 
     // ========================================================================
@@ -229,6 +230,36 @@ namespace VPet {
                 workState = WorkingState::Sleep;
             }
             _startChain(GraphType::Sleep);
+        }
+
+        void displayWork(const char* graphName) {
+            VPET_LOG_I("FSM", "Trigger: Work (%s)", graphName);
+            loopTimes = 0;
+            countNormal = 0;
+            forceLoop = true; // Loop work animation indefinitely
+            workState = WorkingState::Work;
+            
+            // Port logic startChain but with specific graph name
+            strncpy(currentGraphName, graphName, 31);
+            currentGraphName[31] = '\0';
+            currentGraphType = GraphType::Work;
+            maxLoopLength = graph->config.getDuration(graphName);
+
+            const AnimationEntry* entry = graph->findGraph(
+                graphName, AnimatType::A_Start, save->calculateMode());
+            if (entry) {
+                _playEntry(entry);
+                animState = AnimState::Playing_A_Start;
+            } else {
+                entry = graph->findGraph(graphName, AnimatType::B_Loop, save->calculateMode());
+                if (entry) {
+                    _playEntry(entry);
+                    animState = AnimState::Playing_B_Loop;
+                } else {
+                    VPET_LOG_E("FSM", "No suitable entry found for work: %s", graphName);
+                    displayToNormal();
+                }
+            }
         }
 
         bool displayIdel() {

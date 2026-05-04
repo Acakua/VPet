@@ -81,10 +81,7 @@ namespace VPet {
     double GameSave::getStrengthMax() const   { return STRENGTH_MAX; }
     double GameSave::getFeelingMax() const    { return FEELING_MAX; }
 
-    // LikabilityMax => 90 + Level * 10;  (GameSave.cs dòng 252)
-    double GameSave::getLikabilityMax() const {
-        return 90.0 + getLevel() * 10.0;
-    }
+
 
     // ========================================================================
     // Setters — Port chính xác logic clamp từ C# property setters

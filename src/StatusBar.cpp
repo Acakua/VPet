@@ -6,10 +6,41 @@
 
 #include <lvgl.h>
 
+#include "GameLoop.hpp"
+extern VPet::GameLoop* gameLoop;
+
 namespace VPet {
 
     static void toggle_anim_cb(void* var, int32_t v) {
         lv_obj_set_x((lv_obj_t*)var, v);
+    }
+
+    static void work_btn_event_cb(lv_event_t* e) {
+        int index = (int)(intptr_t)lv_event_get_user_data(e);
+        if (gameLoop) {
+            gameLoop->startWork(index);
+        }
+        // Đóng menu sau khi chọn
+        lv_obj_t* menu = (lv_obj_t*)lv_event_get_current_target(e)->parent->parent;
+        lv_obj_add_flag(menu, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    static void open_work_menu_cb(lv_event_t* e) {
+        lv_obj_t* menu = (lv_obj_t*)lv_event_get_user_data(e);
+        lv_obj_clear_flag(menu, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(menu); // Đưa menu lên trên cùng khi mở
+    }
+
+    static void sleep_btn_cb(lv_event_t* e) {
+        if (gameLoop) {
+            if (gameLoop->state == WorkingState::Sleep) {
+                gameLoop->state = WorkingState::Normal;
+                gameLoop->anim->displayToNormal();
+            } else {
+                gameLoop->state = WorkingState::Sleep;
+                gameLoop->anim->displaySleep(true);
+            }
+        }
     }
 
     static void toggle_btn_cb(lv_event_t* e) {
@@ -22,7 +53,7 @@ namespace VPet {
         lv_obj_set_size(card, lv_pct(100), 45);
         lv_obj_set_style_bg_opa(card, 0, 0);
         lv_obj_set_style_border_width(card, 0, 0);
-        lv_obj_set_style_pad_all(card, 2, 0);
+        lv_obj_set_style_pad_all(card, 0, 0); // Xóa sạch padding để tận dụng chiều rộng
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
         // Hàng 1: Icon + Tên + Giá trị (Sử dụng Symbol chuyên nghiệp)
@@ -57,12 +88,12 @@ namespace VPet {
         // --- KHỞI TẠO STYLES (Cyber-Sanctuary Glassmorphism) ---
         lv_style_init(&styleGlass);
         lv_style_set_bg_color(&styleGlass, lv_color_hex(0x0A0A0A)); 
-        lv_style_set_bg_opa(&styleGlass, 180); // Tăng độ mờ kính (OPA_70 -> 180)
+        lv_style_set_bg_opa(&styleGlass, 150); // Giảm nhẹ độ mờ để nhìn xuyên thấu tốt hơn
         lv_style_set_border_width(&styleGlass, 1);
-        lv_style_set_border_color(&styleGlass, lv_color_hex(0x888888)); // Viền kính sáng hơn
+        lv_style_set_border_color(&styleGlass, lv_color_hex(0x888888)); 
         lv_style_set_border_opa(&styleGlass, 60);
-        lv_style_set_border_side(&styleGlass, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_TOP);
-        lv_style_set_radius(&styleGlass, 20); // Bo góc mềm mại hơn
+        lv_style_set_border_side(&styleGlass, LV_BORDER_SIDE_LEFT);
+        lv_style_set_radius(&styleGlass, 15); 
         
         lv_style_init(&styleBarBg);
         lv_style_set_bg_color(&styleBarBg, lv_color_hex(0x333333));
@@ -110,27 +141,61 @@ namespace VPet {
         lv_obj_add_style(barExp, &styleBarIndic, LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(barExp, lv_color_hex(0xFFA500), LV_PART_INDICATOR);
 
-        // 5. Nút Toggle (Handle - Pill Design with Icon)
+        // 5. Nút bấm chức năng (Hàng 2x2)
+        lv_obj_t* btnCont = lv_obj_create(container);
+        lv_obj_set_size(btnCont, lv_pct(100), 100);
+        lv_obj_set_style_bg_opa(btnCont, 0, 0);
+        lv_obj_set_style_border_width(btnCont, 0, 0);
+        lv_obj_set_flex_flow(btnCont, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_style_pad_all(btnCont, 0, 0);
+        lv_obj_set_style_pad_gap(btnCont, 5, 0);
+        lv_obj_clear_flag(btnCont, LV_OBJ_FLAG_SCROLLABLE);
+
+        auto create_btn = [&](const char* icon, lv_color_t color) {
+            lv_obj_t* btn = lv_btn_create(btnCont);
+            lv_obj_set_size(btn, 62, 40); // Giảm nhẹ kích thước để chắc chắn vừa hàng 2
+            lv_obj_set_style_bg_color(btn, color, 0);
+            lv_obj_set_style_bg_opa(btn, 150, 0);
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, icon);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0); // Dùng font nhỏ hơn cho button
+            lv_obj_center(lbl);
+            return btn;
+        };
+
+        btnWork = create_btn(LV_SYMBOL_EDIT "\nWork", lv_color_hex(0x444444));
+        btnStudy = create_btn(LV_SYMBOL_DIRECTORY "\nStudy", lv_color_hex(0x444444));
+        btnPlay = create_btn(LV_SYMBOL_IMAGE "\nPlay", lv_color_hex(0x444444));
+        btnSleep = create_btn(LV_SYMBOL_PAUSE "\nSleep", lv_color_hex(0x444444));
+
+        // 6. Nút Toggle (Handle - Pill Design with Icon)
         btnToggle = lv_btn_create(parent);
-        lv_obj_set_size(btnToggle, 24, 80); // Tăng kích thước để dễ chạm (24x80)
+        lv_obj_set_size(btnToggle, 24, 80); 
         lv_obj_set_style_bg_color(btnToggle, lv_color_hex(0x222222), 0);
         lv_obj_set_style_bg_opa(btnToggle, 180, 0);
-        lv_obj_set_style_radius(btnToggle, 10, 0); // Bo góc hình chữ nhật mềm
+        lv_obj_set_style_radius(btnToggle, 10, 0); 
         lv_obj_set_style_border_width(btnToggle, 1, 0);
         lv_obj_set_style_border_color(btnToggle, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_border_opa(btnToggle, 80, 0);
         
         btnLabel = lv_label_create(btnToggle);
-        lv_label_set_text(btnLabel, LV_SYMBOL_LEFT); // Mặc định là trượt ra
+        lv_label_set_text(btnLabel, LV_SYMBOL_LEFT); 
         lv_obj_center(btnLabel);
         lv_obj_set_style_text_color(btnLabel, lv_color_hex(0xFFFFFF), 0);
 
-        // Đặt toạ độ nút sát mép phải (ban đầu ẩn một phần)
         collapsed = true; 
         lv_obj_set_pos(btnToggle, 480 - 24, 120); 
         lv_obj_set_pos(container, 480, 0);
 
         lv_obj_add_event_cb(btnToggle, toggle_btn_cb, LV_EVENT_CLICKED, this);
+
+        // 7. Menu chọn công việc (Phải tạo SAU btnToggle để đè lên trên)
+        create_work_menu(parent);
+
+        lv_obj_add_event_cb(btnWork, open_work_menu_cb, LV_EVENT_CLICKED, workMenu); 
+        lv_obj_add_event_cb(btnStudy, open_work_menu_cb, LV_EVENT_CLICKED, workMenu);
+        lv_obj_add_event_cb(btnPlay, open_work_menu_cb, LV_EVENT_CLICKED, workMenu);
+        lv_obj_add_event_cb(btnSleep, sleep_btn_cb, LV_EVENT_CLICKED, nullptr);
 
         menuContainer = lv_obj_create(parent);
         lv_obj_add_flag(menuContainer, LV_OBJ_FLAG_HIDDEN);
@@ -253,6 +318,79 @@ namespace VPet {
 
     bool StatusBar::isVisible() const {
         return !lv_obj_has_flag(container, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    void StatusBar::create_work_menu(lv_obj_t* parent) {
+        workMenu = lv_obj_create(parent);
+        lv_obj_set_size(workMenu, 300, 280);
+        lv_obj_center(workMenu);
+        lv_obj_add_style(workMenu, &styleGlass, 0);
+        lv_obj_set_style_bg_opa(workMenu, 240, 0); // Làm menu đậm hơn
+        lv_obj_add_flag(workMenu, LV_OBJ_FLAG_HIDDEN);
+
+        lv_obj_t* lblTitle = lv_label_create(workMenu);
+        lv_label_set_text(lblTitle, "Select Task");
+        lv_obj_set_style_text_font(lblTitle, &lv_font_montserrat_14, 0);
+        lv_obj_align(lblTitle, LV_ALIGN_TOP_MID, 0, 5); // Đẩy xuống một chút để không bị dính viền
+
+        lv_obj_t* list = lv_list_create(workMenu);
+        lv_obj_set_size(list, lv_pct(100), lv_pct(90));
+        lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_bg_opa(list, 0, 0);
+        lv_obj_set_style_border_width(list, 0, 0);
+
+        // Thêm 10 công việc từ GameLoop
+        const char* icons[] = {
+            LV_SYMBOL_EDIT, LV_SYMBOL_TRASH, LV_SYMBOL_VIDEO, // Work
+            LV_SYMBOL_DIRECTORY, LV_SYMBOL_SETTINGS, // Study
+            LV_SYMBOL_IMAGE, LV_SYMBOL_CLOSE, LV_SYMBOL_REFRESH, // Play
+            LV_SYMBOL_KEYBOARD, LV_SYMBOL_IMAGE // Study 2
+        };
+
+        if (gameLoop) {
+            for (int i = 0; i < GameLoop::WORK_COUNT; i++) {
+                const char* icon = (i < 10) ? icons[i] : LV_SYMBOL_LIST;
+                lv_obj_t* btn = lv_list_add_btn(list, icon, gameLoop->works[i].name);
+                lv_obj_add_event_cb(btn, work_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+            }
+        }
+
+        // Nút đóng
+        lv_obj_t* btnClose = lv_btn_create(workMenu);
+        lv_obj_set_size(btnClose, 30, 30);
+        lv_obj_align(btnClose, LV_ALIGN_TOP_RIGHT, 0, 0); // Đặt sát góc trong container
+        lv_obj_set_style_bg_color(btnClose, lv_color_hex(0xFF4444), 0);
+        lv_obj_set_style_radius(btnClose, LV_RADIUS_CIRCLE, 0);
+        lv_obj_t* lblClose = lv_label_create(btnClose);
+        lv_label_set_text(lblClose, LV_SYMBOL_CLOSE);
+        lv_obj_center(lblClose);
+        lv_obj_add_event_cb(btnClose, [](lv_event_t* e){
+            lv_obj_add_flag((lv_obj_t*)lv_event_get_user_data(e), LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_CLICKED, workMenu);
+    }
+
+    void StatusBar::refresh_tasks() {
+        if (!workMenu) return;
+        
+        lv_obj_t* list = lv_obj_get_child(workMenu, 1); // List là con thứ 2 (sau Title)
+        if (!list || !lv_obj_check_type(list, &lv_list_class)) return;
+
+        lv_obj_clean(list);
+
+        const char* icons[] = {
+            LV_SYMBOL_EDIT, LV_SYMBOL_TRASH, LV_SYMBOL_VIDEO,
+            LV_SYMBOL_DIRECTORY, LV_SYMBOL_SETTINGS,
+            LV_SYMBOL_IMAGE, LV_SYMBOL_CLOSE, LV_SYMBOL_REFRESH,
+            LV_SYMBOL_KEYBOARD, LV_SYMBOL_IMAGE
+        };
+
+        if (gameLoop) {
+            for (int i = 0; i < GameLoop::WORK_COUNT; i++) {
+                const char* icon = (i < 10) ? icons[i] : LV_SYMBOL_LIST;
+                lv_obj_t* btn = lv_list_add_btn(list, icon, gameLoop->works[i].name);
+                lv_obj_add_event_cb(btn, work_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+            }
+        }
     }
 
 } // namespace VPet

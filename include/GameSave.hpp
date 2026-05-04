@@ -73,7 +73,7 @@ namespace VPet {
         double getLikability() const;
         double getStrengthMax() const;
         double getFeelingMax() const;
-        double getLikabilityMax() const;
+        double getLikabilityMax() const { return 90.0 + getLevel() * 10.0; } // Port từ GameSave.cs dòng 269
 
         // Setter có logic clamp (Port chính xác từ GameSave.cs property setters)
         void setStrength(double value);

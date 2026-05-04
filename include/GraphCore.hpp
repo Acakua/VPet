@@ -152,7 +152,7 @@ namespace VPet {
     //   - Linear scan 200 phần tử ≈ 10µs → chấp nhận được
     // ========================================================================
 
-    static constexpr uint16_t MAX_ANIMATION_ENTRIES = 256;
+    static constexpr uint16_t MAX_ANIMATION_ENTRIES = 512;
     static constexpr uint8_t  MAX_NAMES_PER_TYPE    = 32;
 
     struct GraphCore {
@@ -179,10 +179,6 @@ namespace VPet {
 
         // ====================================================================
         // load() — Quét thư mục pet trên SD và tự động đăng ký hoạt ảnh
-        //
-        // Chiến lược quét thư mục:
-        //   root/ <GraphName>/ <ModeName>/ <AnimatIndex>/ *.bin
-        //   Ví dụ: /pet/Default/Nomal/1/000_150.bin
         // ====================================================================
         bool load(const char* root) {
             VPET_LOG_I("SD", "Starting SD animation scan at root: %s", root);
@@ -190,9 +186,22 @@ namespace VPet {
 
             File rootDir = SD.open(root);
             if (!rootDir || !rootDir.isDirectory()) {
-                VPET_LOG_E("SD", "Failed to open root directory or not a directory: %s", root);
+                VPET_LOG_E("SD", "Failed to open root directory: %s", root);
                 if (rootDir) rootDir.close();
                 return false;
+            }
+
+            // Kiểm tra sự tồn tại của thư mục Work/Study để cảnh báo người dùng
+            char workPath[64], studyPath[64];
+            snprintf(workPath, sizeof(workPath), "%s/Work", root);
+            snprintf(studyPath, sizeof(studyPath), "%s/Study", root);
+            
+            File wDir = SD.open(workPath);
+            if (!wDir || !wDir.isDirectory()) {
+                VPET_LOG_W("SD", "Directory /pet/Work NOT FOUND! Work animations will not play.");
+            } else {
+                VPET_LOG_I("SD", "Directory /pet/Work found.");
+                wDir.close();
             }
 
             // 1. Quét đệ quy toàn bộ thư mục /pet
@@ -207,6 +216,7 @@ namespace VPet {
             return entryCount > 0;
         }
 
+    private:
         // Đệ quy tìm tất cả các thư mục chứa file .bin
         void _scanRecursive(File& dir, const char* currentPath) {
             File entry = dir.openNextFile();
@@ -238,20 +248,18 @@ namespace VPet {
             }
         }
 
-        // Đăng ký 1 đường dẫn đã xác nhận có file .bin
         void _registerAnimationPath(const char* fullPath, uint16_t frames) {
             GraphInfo info;
             _parseGraphInfo(fullPath, info);
 
-            // VPET_LOG_I("SD", "    Registered: [%s] -> Type:%u Name:%s Mode:%u Animat:%u Frames:%u", 
-            //            fullPath, (uint8_t)info.type, info.name, (uint8_t)info.modeType, (uint8_t)info.animat, frames);
+            VPET_LOG_I("SD", "    Registered: [%s] -> Name:%s Mode:%u Animat:%u", 
+                        fullPath, info.name, (uint8_t)info.modeType, (uint8_t)info.animat);
             
-            addGraph(AnimationEntry(fullPath, info, frames, 100)); // duration_ms sẽ đc parse lúc load frames
+            addGraph(AnimationEntry(fullPath, info, frames, 100));
         }
 
         // Logic parse thông minh hỗ trợ cả 2 cấu trúc thư mục của VPet
         void _parseGraphInfo(const char* fullPath, GraphInfo& outInfo) {
-            // fullPath có dạng: /pet/Default/Nomal/1 hoặc /pet/Drink/Happy/back_lay
             char pathCopy[160];
             strncpy(pathCopy, fullPath, sizeof(pathCopy) - 1);
             pathCopy[sizeof(pathCopy) - 1] = '\0';
@@ -261,7 +269,7 @@ namespace VPet {
 
             char* token = strtok(pathCopy, "/");
             while (token != nullptr && segCount < 10) {
-                if (strcmp(token, "pet") != 0) { // Bỏ qua root
+                if (strcasecmp(token, "pet") != 0) { 
                     segments[segCount++] = token;
                 }
                 token = strtok(nullptr, "/");
@@ -269,54 +277,58 @@ namespace VPet {
 
             if (segCount == 0) return;
 
-            // Segment 0 luôn là GraphType
+            // Segment 0: GraphType
             outInfo.type = _parseGraphType(segments[0]);
             strncpy(outInfo.name, segments[0], 31);
             outInfo.name[31] = '\0';
             outInfo.modeType = ModeType::Normal;
             outInfo.animat = AnimatType::Single;
 
-            // Xử lý các segment còn lại
+            bool nameFixed = false; 
+
             for (int i = 1; i < segCount; i++) {
                 const char* seg = segments[i];
-                bool matchedNumeric = false;
+                bool isSystemKeyword = false;
 
-                // Numeric animat (1, 2, 3, 4)
-                if (strcmp(seg, "1") == 0) { outInfo.animat = AnimatType::A_Start; matchedNumeric = true; }
-                else if (strcmp(seg, "2") == 0) { outInfo.animat = AnimatType::B_Loop; matchedNumeric = true; }
-                else if (strcmp(seg, "3") == 0) { outInfo.animat = AnimatType::C_End; matchedNumeric = true; }
-                else if (strcmp(seg, "4") == 0) { outInfo.animat = AnimatType::Single; matchedNumeric = true; }
-                
-                bool containsPrefix = false;
-                if (!matchedNumeric) {
-                    if (strncmp(seg, "A_", 2) == 0) { outInfo.animat = AnimatType::A_Start; containsPrefix = true; }
-                    else if (strncmp(seg, "B_", 2) == 0) { outInfo.animat = AnimatType::B_Loop; containsPrefix = true; }
-                    else if (strncmp(seg, "C_", 2) == 0) { outInfo.animat = AnimatType::C_End; containsPrefix = true; }
-                    else if (strncmp(seg, "Single_", 7) == 0) { outInfo.animat = AnimatType::Single; containsPrefix = true; }
+                // 1. Nhận diện Animat Phase (Hỗ trợ A, B, C đơn lẻ)
+                if (strcmp(seg, "1") == 0 || strcasecmp(seg, "A") == 0 || strcasecmp(seg, "Start") == 0 || strcasecmp(seg, "A_Start") == 0) { 
+                    outInfo.animat = AnimatType::A_Start; isSystemKeyword = true; 
+                }
+                else if (strcmp(seg, "2") == 0 || strcasecmp(seg, "B") == 0 || strcasecmp(seg, "Loop") == 0 || strcasecmp(seg, "B_Loop") == 0) { 
+                    outInfo.animat = AnimatType::B_Loop; isSystemKeyword = true; 
+                }
+                else if (strcmp(seg, "3") == 0 || strcasecmp(seg, "C") == 0 || strcasecmp(seg, "End") == 0 || strcasecmp(seg, "C_End") == 0) { 
+                    outInfo.animat = AnimatType::C_End; isSystemKeyword = true; 
+                }
+                else if (strcmp(seg, "4") == 0 || strcasecmp(seg, "Single") == 0) { 
+                    outInfo.animat = AnimatType::Single; isSystemKeyword = true; 
                 }
 
-                bool exactMode = false;
-                if (strstr(seg, "Happy")) { outInfo.modeType = ModeType::Happy; exactMode = (strcmp(seg, "Happy") == 0); }
-                else if (strstr(seg, "Nomal")) { outInfo.modeType = ModeType::Normal; exactMode = (strcmp(seg, "Nomal") == 0); }
-                else if (strstr(seg, "Ill")) { outInfo.modeType = ModeType::Ill; exactMode = (strcmp(seg, "Ill") == 0); }
-                else if (strstr(seg, "PoorCondition")) { outInfo.modeType = ModeType::PoorCondition; exactMode = (strcmp(seg, "PoorCondition") == 0); }
+                // 2. Nhận diện Mode (không phân biệt hoa thường)
+                if (strcasestr(seg, "Happy")) { outInfo.modeType = ModeType::Happy; isSystemKeyword = true; }
+                else if (strcasestr(seg, "Nomal")) { outInfo.modeType = ModeType::Normal; isSystemKeyword = true; }
+                else if (strcasestr(seg, "Normal")) { outInfo.modeType = ModeType::Normal; isSystemKeyword = true; }
+                else if (strcasestr(seg, "Ill")) { outInfo.modeType = ModeType::Ill; isSystemKeyword = true; }
+                else if (strcasestr(seg, "PoorCondition")) { outInfo.modeType = ModeType::PoorCondition; isSystemKeyword = true; }
 
-                // Nếu không phải Animat và không chính xác bằng ModeName -> Cập nhật Name
-                if (!containsPrefix && !exactMode && !matchedNumeric) {
+                // 3. Nếu không phải từ khóa hệ thống và chưa fix tên -> Đây là tên hoạt ảnh (vd: workone)
+                if (!isSystemKeyword && !nameFixed) {
                     strncpy(outInfo.name, seg, 31);
                     outInfo.name[31] = '\0';
+                    nameFixed = true; 
                 }
             }
         }
 
-        // Helper Map tên -> Enum (Port từ logic VPet C#)
+        // Helper Map tên -> Enum (Hỗ trợ cả 'Nomal' do lỗi chính tả Resource)
         GraphType _parseGraphType(const char* name) {
-            if (strcmp(name, "Default") == 0) return GraphType::Default;
-            if (strcmp(name, "Eat") == 0) return GraphType::Eat;
-            if (strcmp(name, "Sleep") == 0) return GraphType::Sleep;
-            if (strcmp(name, "Touch_Head") == 0) return GraphType::Touch_Head;
-            if (strcmp(name, "Touch_Body") == 0) return GraphType::Touch_Body;
-            if (strcmp(name, "Idel") == 0) return GraphType::Idel;
+            if (strcasecmp(name, "Default") == 0 || strcasecmp(name, "Nomal") == 0) return GraphType::Default;
+            if (strcasecmp(name, "Eat") == 0) return GraphType::Eat;
+            if (strcasecmp(name, "Sleep") == 0) return GraphType::Sleep;
+            if (strcasecmp(name, "Touch_Head") == 0 || strcasecmp(name, "TouchHead") == 0) return GraphType::Touch_Head;
+            if (strcasecmp(name, "Touch_Body") == 0 || strcasecmp(name, "TouchBody") == 0) return GraphType::Touch_Body;
+            if (strcasecmp(name, "Idel") == 0 || strcasecmp(name, "Idle") == 0) return GraphType::Idel;
+            if (strcasecmp(name, "Work") == 0) return GraphType::Work;
             return GraphType::Common;
         }
 
@@ -398,7 +410,7 @@ namespace VPet {
             const AnimationEntry* candidates[MAX_ANIMATION_ENTRIES];
             uint16_t candCount = 0;
             for (uint16_t i = 0; i < entryCount; i++) {
-                if (strncmp(entries[i].info.name, name, 31) == 0
+                if (strncasecmp(entries[i].info.name, name, 31) == 0
                     && entries[i].info.animat == animat) {
                     candidates[candCount++] = &entries[i];
                 }

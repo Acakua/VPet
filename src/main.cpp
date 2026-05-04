@@ -219,7 +219,7 @@ void setup() {
     digitalWrite(TOUCH_RST, HIGH); delay(100);
 
     Wire.begin(TOUCH_SDA, TOUCH_SCL);
-    Wire.setClock(100000); // Standard Mode để ổn định hơn
+    Wire.setClock(400000); // Tăng lên 400kHz (Fast Mode) để giảm lag touch
     VPET_LOG_I("SYS", "I2C Touch initialized (SDA=%d, SCL=%d, RST=%d)", TOUCH_SDA, TOUCH_SCL, TOUCH_RST);
 
     // 2. KHỞI TẠO THẺ SD (Reset bus và thử lại ở 16MHz)
@@ -228,8 +228,8 @@ void setup() {
     vpet_spi.begin(SD_SCK, SD_MISO, SD_MOSI);
     delay(100);
 
-    VPET_LOG_I("SYS", "Initializing SD Card at 16MHz...");
-    if (!SD.begin(SD_CS, vpet_spi, 16000000)) {
+    VPET_LOG_I("SYS", "Initializing SD Card at 20MHz...");
+    if (!SD.begin(SD_CS, vpet_spi, 20000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
         VPET_LOG_I("SYS", "SD Card OK.");
@@ -387,6 +387,11 @@ void setup() {
             gameLoop = new GameLoop(gameSave, animFSM);
             gameLoop->eventIntervalMs = 2000; // Debug: 2 giây một nhịp (Gốc 15s)
             gameLoop->start();
+            
+            if (statusBar) {
+                statusBar->refresh_tasks();
+            }
+            
             VPET_LOG_I("SYS", "GameLoop started in DEBUG MODE (2s interval).");
         }
     }
@@ -412,7 +417,6 @@ void loop() {
             pet_img_dsc.data = animPlayer->currentBuffer();
             lv_img_set_src(pet_img_obj, &pet_img_dsc);
             lv_obj_invalidate(pet_img_obj);
-            lv_obj_move_foreground(pet_img_obj);
         }
     }
 
@@ -427,5 +431,5 @@ void loop() {
         lastUpdate = millis();
     }
     
-    delay(5);
+    delay(1); // Giảm xuống 1ms để vòng lặp quay nhanh nhất có thể
 }

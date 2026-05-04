@@ -159,10 +159,13 @@ namespace VPet {
         uint16_t currentFrame;       // Index frame hiện tại
         uint32_t lastFrameTime;      // millis() lần cuối đổi frame
 
-        // === PSRAM Animation Cache ===
-        // Toàn bộ frames sẽ được nạp vào PSRAM khi load()
-        // Mỗi frame 320x320x2 = 200KB
-        uint8_t* frameBuffers[MAX_FRAMES];
+        // === PSRAM Animation Buffers (Streaming Engine) ===
+        // Thay vì nạp tất cả, ESP32 chỉ dùng 2 buffer A/B trên PSRAM (Double Buffering).
+        // Mỗi frame 320x320x2 = 200KB. Tổng cộng 400KB PSRAM.
+        uint8_t* bufferA;
+        uint8_t* bufferB;
+        bool isBufferAShowing;   // true: đang hiển thị A (nạp vào B); false: đang hiển thị B (nạp vào A)
+        bool isNextPreloaded;    // Đã nạp xong frame tiếp theo vào buffer chờ chưa?
 
         // === LVGL image descriptor ===
         // Trỏ tới buffer hiện tại, cập nhật mỗi tick
@@ -172,14 +175,16 @@ namespace VPet {
             : frameCount(0), isLoop(false)
             , state(PlayerState::Idle)
             , currentFrame(0), lastFrameTime(0)
+            , bufferA(nullptr), bufferB(nullptr)
+            , isBufferAShowing(true), isNextPreloaded(false)
             , lvglImgDesc(nullptr)
         {
             basePath[0] = '\0';
-            for (int i = 0; i < MAX_FRAMES; i++) frameBuffers[i] = nullptr;
         }
 
-        // Giải phóng toàn bộ cache PSRAM
-        void releaseCache();
+        // Giải phóng bộ đệm PSRAM
+        void releaseBuffers();
+
 
         // ====================================================================
         // load() — Mở thư mục animation, parse danh sách frame
@@ -242,10 +247,9 @@ namespace VPet {
         // Implementation sẽ ở AnimationPlayer.cpp
 
         // === Helper ===
-        // Lấy con trỏ buffer đang hiển thị từ Cache
+        // Lấy con trỏ buffer đang hiển thị (Streaming)
         uint8_t* currentBuffer() const {
-            if (currentFrame < frameCount) return frameBuffers[currentFrame];
-            return nullptr;
+            return isBufferAShowing ? bufferA : bufferB;
         }
 
     private:

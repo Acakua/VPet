@@ -38,10 +38,15 @@ namespace VPet {
         lv_style_t styleBarBg;
         lv_style_t styleBarIndic;
 
-        // Các nút bấm Menu cơ bản
-        lv_obj_t* btnWork;
-        lv_obj_t* btnSleep;
-        lv_obj_t* btnInteract;
+        // Các nút bấm Menu chức năng
+        lv_obj_t* btnWork;      // Kiếm tiền
+        lv_obj_t* btnStudy;     // Kiếm EXP
+        lv_obj_t* btnPlay;      // Giải trí
+        lv_obj_t* btnSleep;     // Ngủ
+
+        // Menu chọn công việc chi tiết
+        lv_obj_t* workMenu; 
+        void create_work_menu(lv_obj_t* parent);
 
         // Constructor khởi tạo giao diện trên 1 parent
         StatusBar(lv_obj_t* parent, lv_obj_t* petImage);
@@ -58,6 +63,9 @@ namespace VPet {
         // Toggle Expand/Collapse SideBar
         void toggle();
         bool isCollapsed() const { return collapsed; }
+
+        // Nạp lại danh sách công việc
+        void refresh_tasks();
 
     private:
         bool collapsed = false;
