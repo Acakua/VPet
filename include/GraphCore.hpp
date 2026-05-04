@@ -314,7 +314,9 @@ namespace VPet {
             if (strcmp(name, "Default") == 0) return GraphType::Default;
             if (strcmp(name, "Eat") == 0) return GraphType::Eat;
             if (strcmp(name, "Sleep") == 0) return GraphType::Sleep;
-            // TODO: Bổ sung thêm các loại khác
+            if (strcmp(name, "Touch_Head") == 0) return GraphType::Touch_Head;
+            if (strcmp(name, "Touch_Body") == 0) return GraphType::Touch_Body;
+            if (strcmp(name, "Idel") == 0) return GraphType::Idel;
             return GraphType::Common;
         }
 

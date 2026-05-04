@@ -109,7 +109,7 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
     if (err != 0) {
         static uint32_t lastErr = 0;
         if (millis() - lastErr > 5000) {
-            VPET_LOG_W("TOUCH", "I2C Communication Error: %d (Check wires!)", err);
+            VPET_LOG_W("TOUCH", "I2C Communication Error: %d", err);
             lastErr = millis();
         }
         data->state = LV_INDEV_STATE_REL;
@@ -124,26 +124,37 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
         uint8_t p1_yh = Wire.read();
         uint8_t p1_yl = Wire.read();
 
-        // Xử lý touchpoint 1
         touches = touches & 0x0F;
         if (touches > 0 && touches <= 2) {
-            uint16_t x = ((p1_xh & 0x0F) << 8) | p1_xl;
-            uint16_t y = ((p1_yh & 0x0F) << 8) | p1_yl;
+            // Tọa độ Raw từ sensor (Thường là 0-320 cho X, 0-480 cho Y)
+            uint16_t raw_x = ((p1_xh & 0x0F) << 8) | p1_xl;
+            uint16_t raw_y = ((p1_yh & 0x0F) << 8) | p1_yl;
 
-            // Lọc dữ liệu lỗi/ngoài màn hình
-            if (x >= screenWidth || y >= screenHeight) {
-                data->state = LV_INDEV_STATE_REL;
-                return;
-            }
+            // CHUYỂN ĐỔI TỌA ĐỘ CHO CHẾ ĐỘ NGANG (Rotation 1)
+            // Sensor Portrait (320x480) -> Screen Landscape (480x320)
+            uint16_t screen_x = raw_y;           // X màn hình = Y cảm ứng
+            uint16_t screen_y = 320 - raw_x;     // Y màn hình = Đảo ngược X cảm ứng
+
+            // Giới hạn vùng an toàn
+            if (screen_x >= screenWidth)  screen_x = screenWidth - 1;
+            if (screen_y >= screenHeight) screen_y = screenHeight - 1;
 
             data->state = LV_INDEV_STATE_PR;
-            data->point.x = x;
-            data->point.y = y;
+            data->point.x = screen_x;
+            data->point.y = screen_y;
             
-            // Dispatch tới AnimationStateMachine
+            // Log debug tọa độ (chỉ in mỗi 100ms khi nhấn để tránh lụt log)
+            static uint32_t lastTouchLog = 0;
+            if (millis() - lastTouchLog > 100) {
+                VPET_LOG_D("TOUCH", "Raw[%u,%u] -> Screen[%u,%u]", raw_x, raw_y, screen_x, screen_y);
+                lastTouchLog = millis();
+            }
+
+            // Dispatch tới AnimationStateMachine (Vùng tương tác Pet)
             if (animFSM) {
-                if (x < 320) { // Vùng Pet
-                    if (y < 160) {
+                uint16_t pet_boundary = (statusBar && !statusBar->isCollapsed()) ? 300 : 440;
+                if (screen_x < pet_boundary) { 
+                    if (screen_y < 160) {
                         animFSM->displayTouchHead();
                         if (gameLoop) gameLoop->interact();
                     } else {
@@ -152,7 +163,6 @@ void my_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data) {
                     }
                 }
             }
-            VPET_LOG_V("TOUCH", "Pressed at X:%u, Y:%u", x, y);
         } else {
             data->state = LV_INDEV_STATE_REL;
         }
@@ -212,9 +222,14 @@ void setup() {
     Wire.setClock(100000); // Standard Mode để ổn định hơn
     VPET_LOG_I("SYS", "I2C Touch initialized (SDA=%d, SCL=%d, RST=%d)", TOUCH_SDA, TOUCH_SCL, TOUCH_RST);
 
-    // 2. KHỞI TẠO THẺ SD (Dùng bus SPI nhanh)
-    VPET_LOG_I("SYS", "Initializing SD Card on HSPI bus...");
-    if (!SD.begin(SD_CS, vpet_spi, 40000000)) {
+    // 2. KHỞI TẠO THẺ SD (Reset bus và thử lại ở 16MHz)
+    vpet_spi.end(); 
+    delay(100);
+    vpet_spi.begin(SD_SCK, SD_MISO, SD_MOSI);
+    delay(100);
+
+    VPET_LOG_I("SYS", "Initializing SD Card at 16MHz...");
+    if (!SD.begin(SD_CS, vpet_spi, 16000000)) {
         VPET_LOG_E("SYS", "SD Card Mount Failed!");
     } else {
         VPET_LOG_I("SYS", "SD Card OK.");
@@ -267,7 +282,8 @@ void setup() {
     lv_log_register_print_cb(my_log_cb);
 
     VPET_LOG_I("SYS", "Allocating Framebuffers in Internal RAM...");
-    uint32_t bufSize = screenWidth * 20;
+    // Tối ưu buffer về mức 16k (16384 bytes) để ổn định bus SPI
+    uint32_t bufSize = 16384; 
     buf1 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     buf2 = (lv_color_t*) heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     
